@@ -1,15 +1,32 @@
+FROM cgr.dev/chainguard/wolfi-base AS bin
+
+RUN apk add --no-cache gcc=14.2.0-r13 go make git
+
+ARG NANOBOT_REPO=https://github.com/nanobot-ai/nanobot.git
+ARG NANOBOT_BRANCH=main
+
+RUN git clone ${NANOBOT_REPO}
+
+WORKDIR /nanobot
+
+RUN git fetch origin && git checkout origin/${NANOBOT_BRANCH}
+
+RUN --mount=type=cache,target=/root/go/pkg/mod make build
+
 FROM cgr.dev/chainguard/wolfi-base:latest
 
 RUN apk add make git nodejs npm pnpm python3
 
 RUN npm install -g npm
 
+COPY --from=bin /nanobot/bin/nanobot /usr/local/bin/
+
 # Setup chrome for things like Playwright
 RUN mkdir -p /opt/google/chrome && \
     apk add chromium && \
     ln -sf /usr/bin/chromium-browser /opt/google/chrome/chrome
 
-RUN mkdir -p /home/user/.local/bin && chown -R 1000:0 /home/user && chown -R 1000:0 /usr/local
+RUN mkdir -p /home/user/.local/bin /home/user/.config/nanobot && chown -R 1000:0 /home/user && chown -R 1000:0 /usr/local
 
 USER 1000
 
@@ -27,8 +44,6 @@ ENV UV_LINK_MODE=copy
 
 RUN python -m ensurepip && pip3 install uv
 
-RUN npm install -g supergateway
-
-ENTRYPOINT ["supergateway"]
+ENTRYPOINT ["nanobot"]
 
 CMD ["--help"]

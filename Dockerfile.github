@@ -6,10 +6,22 @@ COPY --from=binary /server/github-mcp-server .
 
 USER root
 
-COPY scripts/entrypoint.sh .
+RUN cat > nanobot.yaml <<'EOF'
+publish:
+  mcpServers: [server]
 
-RUN chmod +x entrypoint.sh
+mcpServers:
+  server:
+    command: ./github-mcp-server
+    args: [stdio]
+    env:
+      GITHUB_PERSONAL_ACCESS_TOKEN: ${GITHUB_PERSONAL_ACCESS_TOKEN}
+EOF
 
-ENTRYPOINT ["./entrypoint.sh", "./github-mcp-server stdio"]
+RUN chown 1000 nanobot.yaml
+
+ENTRYPOINT ["nanobot"]
+
+CMD ["run", "--listen-address", ":8099", "./nanobot.yaml"]
 
 USER 1000
