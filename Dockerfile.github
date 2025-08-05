@@ -16,12 +16,15 @@ mcpServers:
     args: [stdio]
     env:
       GITHUB_PERSONAL_ACCESS_TOKEN: ${GITHUB_PERSONAL_ACCESS_TOKEN}
+      GITHUB_TOOLSETS: ${GITHUB_TOOLSETS}
+      GITHUB_DYNAMIC_TOOLSETS: ${GITHUB_DYNAMIC_TOOLSETS}
+      GITHUB_HOST: ${GITHUB_HOST}
 EOF
 
 RUN chown 1000 nanobot.yaml
 
 ENTRYPOINT ["nanobot"]
 
-CMD ["run", "--listen-address", ":8099", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "./nanobot.yaml"]
+CMD ["run", "--listen-address", ":8099", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "-e", "GITHUB_TOOLSETS", "-e", "GITHUB_DYNAMIC_TOOLSETS", "-e", "GITHUB_HOST", "./nanobot.yaml"]
 
 USER 1000
