@@ -11,7 +11,7 @@ on:
     branches:
       - main
     tags:
-      - 'v*'
+      - "v*"
 jobs:
   docker-build:
     strategy:
@@ -20,7 +20,6 @@ jobs:
         image-identifier:
           - phat
           - github
-          - atlassian
     runs-on: depot-ubuntu-22.04
     steps:
       - name: Checkout code
@@ -55,7 +54,7 @@ jobs:
       - name: Install Cosign
         uses: sigstore/cosign-installer@v3.8.1
         with:
-          cosign-release: 'v2.4.3'
+          cosign-release: "v2.4.3"
       - name: Check install!
         run: cosign version
       - name: Sign Images
@@ -81,8 +80,8 @@ jobs:
         uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: ghcr.io/${{ github.repository }}-${{ matrix.image-identifier }}:${{ github.ref_name }}
-          skip-dirs: '**/venv'
-          format: 'sarif'
+          skip-dirs: "**/venv"
+          format: "sarif"
           output: "trivy-results-${{ matrix.image-identifier }}.sarif"
       - name: Upload SARIF file
         uses: github/codeql-action/upload-sarif@v3
