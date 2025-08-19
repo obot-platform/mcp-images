@@ -1,0 +1,46 @@
+// Import the registration function
+import { registerTool } from './index.js';
+// Import tool classes
+import { UserCredentialsTool } from './oauth/getUserDetailsTool.js';
+import { ObjectListTool } from './objects/listObjectsTool.js';
+import { ObjectSearchTool } from './objects/searchObjectsTool.js';
+import { BatchCreateAssociationsTool } from './associations/batchCreateAssociationsTool.js';
+import { AssociationSchemaDefinitionTool } from './associations/getAssociationDefinitionsTool.js';
+import { AssociationsListTool } from './associations/listAssociationsTool.js';
+import { BatchCreateObjectsTool } from './objects/batchCreateObjectsTool.js';
+import { BatchUpdateObjectsTool } from './objects/batchUpdateObjectsTool.js';
+import { BatchReadObjectsTool } from './objects/batchReadObjectsTool.js';
+import { PropertiesListTool } from './properties/listPropertiesTool.js';
+import { GetPropertyTool } from './properties/getPropertyTool.js';
+import { CreatePropertyTool } from './properties/createPropertyTool.js';
+import { UpdatePropertyTool } from './properties/updatePropertyTool.js';
+import { CreateEngagementTool } from './engagements/createEngagementTool.js';
+import { GetEngagementTool } from './engagements/getEngagementTool.js';
+import { UpdateEngagementTool } from './engagements/updateEngagementTool.js';
+import { FeedbackLinkTool } from './links/feedbackLinkTool.js';
+import { GetSchemasTool } from './objects/getSchemaTool.js';
+import { GetHubspotLinkTool } from './links/getHubspotLinkTool.js';
+import { WorkflowsListTool } from './workflows/listWorkflowsTool.js';
+import { GetWorkflowTool } from './workflows/getWorkflowTool.js';
+// Register all tools
+registerTool(new UserCredentialsTool());
+registerTool(new ObjectListTool());
+registerTool(new ObjectSearchTool());
+registerTool(new BatchCreateAssociationsTool());
+registerTool(new AssociationSchemaDefinitionTool());
+registerTool(new AssociationsListTool());
+registerTool(new BatchCreateObjectsTool());
+registerTool(new BatchUpdateObjectsTool());
+registerTool(new BatchReadObjectsTool());
+registerTool(new PropertiesListTool());
+registerTool(new GetPropertyTool());
+registerTool(new CreatePropertyTool());
+registerTool(new UpdatePropertyTool());
+registerTool(new CreateEngagementTool());
+registerTool(new GetEngagementTool());
+registerTool(new UpdateEngagementTool());
+registerTool(new FeedbackLinkTool());
+registerTool(new GetSchemasTool());
+registerTool(new GetHubspotLinkTool());
+registerTool(new WorkflowsListTool());
+registerTool(new GetWorkflowTool());

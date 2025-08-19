@@ -1,0 +1,37 @@
+FROM ghcr.io/obot-platform/mcp-images-phat:main
+
+WORKDIR /app
+
+# Copy package files
+COPY hubspot/package*.json ./
+
+# Copy the built application
+COPY hubspot/dist ./dist
+COPY hubspot/LICENSE ./
+
+USER root
+
+# Install only production dependencies (skip scripts since we have pre-built dist)
+RUN npm ci --omit=dev --ignore-scripts && \
+    npm cache clean --force
+
+RUN cat > /nanobot.yaml <<'EOF'
+publish:
+  mcpServers: [server]
+
+mcpServers:
+  server:
+    command: node
+    args: [/app/dist/index.js]
+    env:
+      NODE_ENV: production
+      PRIVATE_APP_ACCESS_TOKEN: ${PRIVATE_APP_ACCESS_TOKEN}
+EOF
+
+RUN chown 1000 /nanobot.yaml
+
+ENTRYPOINT ["nanobot"]
+
+CMD ["run", "--listen-address", ":8099", "-e", "PRIVATE_APP_ACCESS_TOKEN", "/nanobot.yaml"]
+
+USER 1000

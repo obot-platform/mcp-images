@@ -1,0 +1,48 @@
+{
+  "name": "@hubspot/mcp-server",
+  "version": "0.4.0",
+  "description": "MCP Server for developers building HubSpot Apps",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "mcp-hubspot": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "npm run clean && tsc",
+    "clean": "rm -rf dist",
+    "prepare": "npm run build && chmod +x dist/index.js",
+    "start": "node dist/index.js",
+    "lint": "eslint . --ext .js,.ts",
+    "lint:fix": "eslint . --ext .js,.ts --fix",
+    "format": "prettier --write \"src/**/*.{js,ts}\"",
+    "format:check": "prettier --check \"src/**/*.{js,ts}\"",
+    "npm:login": "npm_config_userconfig=~/.npmrc.public_publish bend exec npm login",
+    "changeset:version": "npm_config_userconfig=~/.npmrc.public_publish changeset version",
+    "changeset:publish": "npm_config_userconfig=~/.npmrc.public_publish changeset publish"
+  },
+  "keywords": [
+    "mcp",
+    "hubspot"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.1",
+    "dotenv": "^16.5.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.29.2",
+    "@types/node": "^20.11.5",
+    "@typescript-eslint/eslint-plugin": "^8.31.1",
+    "@typescript-eslint/parser": "^8.31.1",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^10.1.2",
+    "eslint-plugin-prettier": "^5.2.6",
+    "eslint-plugin-unused-imports": "^4.1.4",
+    "prettier": "^3.5.3",
+    "typescript": "^5.8.2"
+  }
+}
