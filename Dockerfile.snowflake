@@ -32,3 +32,5 @@ ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 9000
 
 CMD ["mcp-server-snowflake", "--transport", "streamable-http"]
+
+# Trigger workflow build
