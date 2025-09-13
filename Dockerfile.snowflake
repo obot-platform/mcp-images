@@ -33,4 +33,4 @@ EXPOSE 9000
 
 CMD ["mcp-server-snowflake", "--transport", "streamable-http"]
 
-# Trigger workflow build
+# Build trigger: $(date)
