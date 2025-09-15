@@ -1,46 +1,24 @@
-FROM cgr.dev/chainguard/wolfi-base AS bin
+FROM ghcr.io/obot-platform/mcp-images-nanobot:main
 
-RUN apk add --no-cache gcc=14.2.0-r13 go make git
-
-ARG NANOBOT_REPO=https://github.com/nanobot-ai/nanobot.git
-ARG NANOBOT_BRANCH=main
-
-RUN git clone ${NANOBOT_REPO}
-
-WORKDIR /nanobot
-
-RUN git fetch origin && git checkout origin/${NANOBOT_BRANCH}
-
-RUN --mount=type=cache,target=/root/go/pkg/mod make build
-
-FROM cgr.dev/chainguard/wolfi-base:latest
+USER root
 
 RUN apk add make git python3
-
-
-COPY --from=bin /nanobot/bin/nanobot /usr/local/bin/
 
 # Setup chrome for things like Playwright
 RUN mkdir -p /opt/google/chrome && \
     apk add chromium && \
     ln -sf /usr/bin/chromium-browser /opt/google/chrome/chrome
 
-RUN mkdir -p /home/user/.local/bin /home/user/.config/nanobot && chown -R 1000:0 /home/user && chown -R 1000:0 /usr/local
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
-USER 1000
-
-ENV HOME=/home/user
-ENV DOCKER_CONTAINER=true
-
-WORKDIR /home/user
-
-ENV PATH="/home/user/.local/bin:$PATH"
 # Enable bytecode compilation
 ENV UV_COMPILE_BYTECODE=1
 # Copy from the cache instead of linking since it's a mounted volume
 ENV UV_LINK_MODE=copy
 
 RUN python -m ensurepip && pip3 install uv
+
+USER 1000
 
 ENTRYPOINT ["nanobot"]
 

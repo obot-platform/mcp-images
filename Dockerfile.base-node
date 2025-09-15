@@ -1,42 +1,21 @@
-FROM cgr.dev/chainguard/wolfi-base AS bin
+FROM ghcr.io/obot-platform/mcp-images-nanobot:main
 
-RUN apk add --no-cache gcc=14.2.0-r13 go make git
-
-ARG NANOBOT_REPO=https://github.com/nanobot-ai/nanobot.git
-ARG NANOBOT_BRANCH=main
-
-RUN git clone ${NANOBOT_REPO}
-
-WORKDIR /nanobot
-
-RUN git fetch origin && git checkout origin/${NANOBOT_BRANCH}
-
-RUN --mount=type=cache,target=/root/go/pkg/mod make build
-
-FROM cgr.dev/chainguard/wolfi-base:latest
+USER root
 
 RUN apk add make git nodejs npm pnpm
 
 RUN npm install -g npm
 
-COPY --from=bin /nanobot/bin/nanobot /usr/local/bin/
+RUN chown -R 1000:1000 "/home/user/.npm"
 
 # Setup chrome for things like Playwright
 RUN mkdir -p /opt/google/chrome && \
     apk add chromium && \
     ln -sf /usr/bin/chromium-browser /opt/google/chrome/chrome
 
-RUN mkdir -p /home/user/.local/bin /home/user/.config/nanobot && chown -R 1000:0 /home/user && chown -R 1000:0 /usr/local
-
-USER 1000
-
-ENV HOME=/home/user
-ENV DOCKER_CONTAINER=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
-WORKDIR /home/user
-
-ENV PATH="/home/user/.local/bin:$PATH"
+USER 1000
 
 ENTRYPOINT ["nanobot"]
 

@@ -1,4 +1,4 @@
-FROM ghcr.io/obot-platform/mcp-images-phat:main
+FROM ghcr.io/obot-platform/mcp-images-base-node:main
 
 WORKDIR /app
 
