@@ -47,7 +47,7 @@ images:
   - name: context7
     type: node
     package: "@upstash/context7-mcp"
-    version: 1.0.16
+    version: 1.0.17
     command: "context7-mcp"
   - name: datadog
     type: node
