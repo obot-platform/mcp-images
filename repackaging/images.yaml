@@ -81,7 +81,7 @@ images:
   - name: mongodb-database
     type: node
     package: mongodb-mcp-server
-    version: 0.3.0
+    version: 1.0.1
     command: mongodb-mcp-server --transport http --httpPort 3000 --connectionString ${CONNECTION_STRING}
   - name: mysql-mcp-server
     type: python
