@@ -52,7 +52,7 @@ images:
   - name: datadog
     type: node
     package: "@winor30/mcp-server-datadog"
-    version: latest
+    version: 1.6.0
     command: "mcp-server-datadog"
   - name: duckduckgo-search
     type: python
