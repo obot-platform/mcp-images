@@ -7,7 +7,7 @@ images:
   - name: atlassian
     type: docker
     package: ghcr.io/sooperset/mcp-atlassian
-    version: latest
+    version: null
     command: --transport streamable-http --port 9000
   - name: aws-cdk
     type: python
