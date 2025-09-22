@@ -2,7 +2,7 @@ images:
   - name: antv-charts
     type: node
     package: "@antv/mcp-server-chart"
-    version: 0.8.3
+    version: 0.9.0
     command: mcp-server-chart --transport streamable --endpoint "/" --port 1122
   - name: atlassian
     type: docker
