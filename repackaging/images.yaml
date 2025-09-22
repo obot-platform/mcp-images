@@ -67,7 +67,7 @@ images:
   - name: firecrawl
     type: node
     package: firecrawl-mcp
-    version: 2.0.2
+    version: 3.2.0
     command: "firecrawl-mcp"
   - name: gitlab
     type: node
