@@ -42,7 +42,7 @@ images:
   - name: browserbase
     type: node
     package: "@browserbasehq/mcp-server-browserbase"
-    version: 2.0.1
+    version: 2.1.1
     command: "mcp-server-browserbase"
   - name: context7
     type: node
