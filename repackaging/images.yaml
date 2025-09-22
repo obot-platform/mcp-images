@@ -76,7 +76,7 @@ images:
   - name: mongodb-atlas
     type: node
     package: mongodb-mcp-server
-    version: 0.3.0
+    version: 1.0.1
     command: mongodb-mcp-server --transport http --httpPort 3000 --disabledTools mongodb
   - name: mongodb-database
     type: node
