@@ -37,7 +37,7 @@ images:
   - name: azure
     type: node
     package: "@azure/mcp"
-    version: latest
+    version: 0.8.0
     command: azmcp server start
   - name: browserbase
     type: node
