@@ -101,7 +101,7 @@ images:
   - name: supabase
     type: node
     package: "@supabase/mcp-server-supabase"
-    version: 0.5.1
+    version: 0.5.5
     command: "mcp-server-supabase"
   - name: tavily
     type: node
