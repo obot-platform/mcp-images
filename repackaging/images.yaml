@@ -106,7 +106,7 @@ images:
   - name: tavily
     type: node
     package: tavily-mcp
-    version: 0.2.9
+    version: 0.2.10
     command: "tavily-mcp"
   - name: wordpress
     type: node
