@@ -111,7 +111,7 @@ images:
   - name: wordpress
     type: node
     package: "@automattic/mcp-wordpress-remote"
-    version: 0.2.10
+    version: 0.2.18
     command: "mcp-wordpress-remote"
   - name: digitalocean
     type: node
