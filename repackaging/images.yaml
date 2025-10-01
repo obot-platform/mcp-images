@@ -94,4 +94,4 @@ images:
   - name: dynatrace
     type: node
     package: "@dynatrace-oss/dynatrace-mcp-server"
-    version: 0.6.1
+    version: 0.7.0
