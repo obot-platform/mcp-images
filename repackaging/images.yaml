@@ -26,7 +26,7 @@ images:
   - name: aws-redshift
     type: python
     package: awslabs.redshift-mcp-server
-    version: 0.0.8
+    version: 0.0.9
   - name: azure
     type: node
     package: "@azure/mcp"
