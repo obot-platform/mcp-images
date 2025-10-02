@@ -50,7 +50,7 @@ images:
   - name: exa-search
     type: node
     package: exa-mcp-server
-    version: 2.1.0
+    version: 3.0.5
   - name: firecrawl
     type: node
     package: firecrawl-mcp
