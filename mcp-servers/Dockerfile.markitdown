@@ -1,0 +1,5 @@
+FROM python:3.13-slim-bullseye
+
+RUN pip install markitdown-mcp
+
+CMD ["markitdown-mcp" , "--http", "--host", "0.0.0.0", "--port", "8099"]
