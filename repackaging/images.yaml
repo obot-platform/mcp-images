@@ -90,7 +90,7 @@ images:
   - name: digitalocean
     type: node
     package: "@digitalocean/mcp"
-    version: 1.0.10
+    version: 1.0.11
   - name: dynatrace
     type: node
     package: "@dynatrace-oss/dynatrace-mcp-server"
