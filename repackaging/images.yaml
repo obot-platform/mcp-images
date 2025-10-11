@@ -106,4 +106,4 @@ images:
   - name: redis
     type: python
     package: redis-mcp-server
-    version: 0.3.1
+    version: 0.3.4
