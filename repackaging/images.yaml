@@ -62,7 +62,7 @@ images:
   - name: gitlab
     type: node
     package: "@zereight/mcp-gitlab"
-    version: 2.0.4
+    version: 2.0.7
   - name: mongodb-atlas
     type: node
     package: mongodb-mcp-server
