@@ -58,7 +58,7 @@ images:
   - name: firecrawl
     type: node
     package: firecrawl-mcp
-    version: 3.3.6
+    version: 3.4.0
   - name: gitlab
     type: node
     package: "@zereight/mcp-gitlab"
