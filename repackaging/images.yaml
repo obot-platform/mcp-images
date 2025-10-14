@@ -38,7 +38,7 @@ images:
   - name: browserbase
     type: node
     package: "@browserbasehq/mcp-server-browserbase"
-    version: 2.1.2
+    version: 2.1.3
   - name: context7
     type: node
     package: "@upstash/context7-mcp"
