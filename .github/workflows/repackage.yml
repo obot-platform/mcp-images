@@ -191,4 +191,11 @@ jobs:
           token: ${{ secrets.DISPATCH_PAT }}
           repository: obot-platform/mcp-catalog
           event-type: update-image-tag
-          client-payload: '{"image_name":"ghcr.io/${{ github.repository }}/${{ matrix.name }}","new_tag":"${{ matrix.version }}"}'
+          client-payload: |
+            {
+              "image_name": "ghcr.io/${{ github.repository }}/${{ matrix.name }}",
+              "new_tag": "${{ matrix.version }}",
+              "name": "${{ matrix.name }}",
+              "package": "${{ matrix.package }}",
+              "type": "${{ matrix.type }}"
+            }
