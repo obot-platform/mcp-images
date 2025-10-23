@@ -46,7 +46,7 @@ images:
   - name: context7
     type: node
     package: "@upstash/context7-mcp"
-    version: 1.0.21
+    version: 1.0.25
   - name: datadog
     type: node
     package: "@winor30/mcp-server-datadog"
