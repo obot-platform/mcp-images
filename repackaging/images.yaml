@@ -22,7 +22,7 @@ images:
   - name: aws-eks
     type: python
     package: awslabs.eks-mcp-server
-    version: 0.1.13
+    version: 0.1.15
   - name: aws-kendra
     type: python
     package: awslabs.amazon-kendra-index-mcp-server
