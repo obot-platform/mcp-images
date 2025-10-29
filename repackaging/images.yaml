@@ -2,7 +2,7 @@ images:
   - name: antv-charts
     type: node
     package: "@antv/mcp-server-chart"
-    version: 0.9.1
+    version: 0.9.2
   - name: atlassian
     type: docker
     package: ghcr.io/sooperset/mcp-atlassian
