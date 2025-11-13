@@ -1,7 +1,8 @@
 ARG BASE_IMAGE=cgr.dev/chainguard/wolfi-base:latest
 FROM cgr.dev/chainguard/wolfi-base:latest AS bin
 
-RUN apk add --no-cache gcc=14.2.0-r13 go make git
+# Update and upgrade to get latest packages including Go 1.25.2+
+RUN apk update && apk upgrade && apk add --no-cache go make git gcc
 
 RUN --mount=type=bind,from=nanobot,target=/mnt/nanobot,rw \
   --mount=type=cache,target=/root/.cache/go-build \
