@@ -58,7 +58,7 @@ images:
   - name: firecrawl
     type: node
     package: firecrawl-mcp
-    version: 3.6.0
+    version: 3.6.1
   - name: files-com
     type: python
     package: files-com-mcp
