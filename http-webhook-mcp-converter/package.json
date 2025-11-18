@@ -1,0 +1,15 @@
+{
+  "name": "phrase-detector-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.21.0",
+    "express": "^5.1.0",
+    "zod": "^3.25.76"
+  }
+}
