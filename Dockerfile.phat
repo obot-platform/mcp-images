@@ -1,4 +1,4 @@
-FROM ghcr.io/obot-platform/mcp-images/nanobot:main
+FROM ghcr.io/nanobot-ai/nanobot:v0.0.34
 
 USER root
 
@@ -6,7 +6,8 @@ RUN apk add make git nodejs npm pnpm python3
 
 RUN npm install -g npm
 
-RUN chown -R 1000:1000 "/home/user/.npm"
+RUN mkdir -p /home/nanobot/.npm && \
+    chown -R nanobot:nanobot "/home/nanobot/.npm"
 
 # Setup chrome for things like Playwright
 RUN mkdir -p /opt/google/chrome && \
@@ -20,7 +21,9 @@ ENV UV_COMPILE_BYTECODE=1
 # Copy from the cache instead of linking since it's a mounted volume
 ENV UV_LINK_MODE=copy
 
-USER 1000
+USER nanobot
+
+ENV PATH="/home/nanobot/.local/bin:$PATH"
 
 RUN python -m ensurepip && pip3 install uv
 
