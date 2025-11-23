@@ -125,3 +125,7 @@ images:
     type: docker
     package: hashicorp/terraform-mcp-server
     version: 0.3.2
+  - name: ssh
+    type: python
+    package: idletoaster/ssh-mcp-server
+    version: 2.1.9
