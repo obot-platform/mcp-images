@@ -106,13 +106,6 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository }}/${{ matrix.name }}-base:${{ matrix.version }}
 
-      - name: Checkout nanobot
-        uses: actions/checkout@v4
-        if: ${{ matrix.type == 'node' || matrix.type == 'python' }}
-        with:
-          repository: nanobot-ai/nanobot
-          path: nanobot
-
       - name: Build final image
         if: ${{ matrix.type == 'node' || matrix.type == 'python' }}
         uses: depot/build-push-action@v1
@@ -123,8 +116,6 @@ jobs:
           push: true
           pull: true
           file: Dockerfile.nanobot
-          build-contexts: |
-            nanobot=./nanobot
           platforms: linux/amd64,linux/arm64
           build-args: |
             BASE_IMAGE=ghcr.io/${{ github.repository }}/${{ matrix.name }}-base:${{ matrix.version }}
