@@ -30,6 +30,8 @@ EOF
 
 RUN chown 1000 /nanobot.yaml
 
+COPY --from=ghcr.io/nanobot-ai/nanobot:v0.0.41 /usr/local/bin/nanobot /usr/local/bin/
+
 ENTRYPOINT ["nanobot"]
 
 CMD ["run", "--listen-address", ":8099", "-e", "PRIVATE_APP_ACCESS_TOKEN", "/nanobot.yaml"]

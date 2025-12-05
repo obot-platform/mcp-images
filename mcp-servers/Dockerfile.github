@@ -1,6 +1,6 @@
 FROM ghcr.io/github/github-mcp-server as binary
 
-FROM ghcr.io/obot-platform/mcp-images/nanobot:main
+FROM ghcr.io/nanobot-ai/nanobot:v0.0.41
 
 COPY --from=binary /server/github-mcp-server .
 
