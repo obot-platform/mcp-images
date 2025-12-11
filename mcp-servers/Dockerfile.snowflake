@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
 # Clone the snowflake-mcp repository with configurable parameters
 ARG SNOWFLAKE_MCP_REPO=https://github.com/obot-platform/snowflake-mcp.git
-ARG SNOWFLAKE_MCP_COMMIT=main
+ARG SNOWFLAKE_MCP_COMMIT=b9012451537366424430ffc4bd4d54935ac22a32
 RUN git clone ${SNOWFLAKE_MCP_REPO} . && \
     git checkout ${SNOWFLAKE_MCP_COMMIT}
 
