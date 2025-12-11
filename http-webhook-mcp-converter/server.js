@@ -18,7 +18,7 @@ const port = parseInt(process.env.PORT || "8099");
 
 // Set up Express and HTTP transport
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: "50mb" }));
 
 const transports = {};
 
