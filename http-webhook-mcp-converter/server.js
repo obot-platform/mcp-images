@@ -58,11 +58,13 @@ app.post("/mcp", async (req, res) => {
         title: "Fire Webhook",
         description: "Send a message to the configured webhook URL",
         inputSchema: {
-          message: z.string(),
+          accept: z.boolean(),
+          reason: z.string(),
+          message: z.any(),
         },
         outputSchema: {
-          accepted: z.boolean(),
-          message: z.string(),
+          accept: z.boolean(),
+          reason: z.string(),
         },
       },
       async ({ message }) => {
@@ -72,10 +74,13 @@ app.post("/mcp", async (req, res) => {
             "Content-Type": "application/json",
           };
 
+          // Serialize message to JSON string
+          const messageBody = JSON.stringify(message);
+
           // Sign the payload if webhook secret is provided
           if (WEBHOOK_SECRET) {
             const hmac = createHmac("sha256", WEBHOOK_SECRET);
-            hmac.update(message);
+            hmac.update(messageBody);
             const signature = hmac.digest("hex");
             headers["X-Obot-Signature-256"] = signature;
           }
@@ -84,21 +89,21 @@ app.post("/mcp", async (req, res) => {
           const response = await fetch(WEBHOOK_URL, {
             method: "POST",
             headers,
-            body: message,
+            body: messageBody,
           });
 
           if (response.ok) {
-            resp["accepted"] = true;
-            resp["message"] = "Message accepted by webhook";
+            resp["accept"] = true;
+            resp["reason"] = "Message accepted by webhook";
           } else {
             const errorBody = await response.text();
-            resp["accepted"] = false;
-            resp["message"] =
+            resp["accept"] = false;
+            resp["reason"] =
               `Webhook returned error: ${response.status} ${errorBody}`;
           }
         } catch (error) {
-          resp["accepted"] = false;
-          resp["message"] = `Failed to send to webhook: ${error.message}`;
+          resp["accept"] = false;
+          resp["reason"] = `Failed to send to webhook: ${error.message}`;
         }
         return {
           content: [

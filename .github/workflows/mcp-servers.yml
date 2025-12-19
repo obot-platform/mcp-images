@@ -29,7 +29,7 @@ jobs:
           - snowflake
           - elasticsearch
           - googlecloudrun
-          - http-webhook-converter
+          - http-webhook-mcp-converter
     runs-on: depot-ubuntu-22.04
     steps:
       - name: Checkout code
