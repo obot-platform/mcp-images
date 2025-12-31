@@ -22,7 +22,7 @@ images:
   - name: aws-kendra
     type: python
     package: awslabs.amazon-kendra-index-mcp-server
-    version: 1.0.9
+    version: 1.0.10
   - name: aws-redshift
     type: python
     package: awslabs.redshift-mcp-server
