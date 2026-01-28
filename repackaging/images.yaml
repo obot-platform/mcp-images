@@ -62,7 +62,7 @@ images:
   - name: files-com
     type: python
     package: files-com-mcp
-    version: 1.0.40
+    version: 1.0.42
   - name: gitlab
     type: node
     package: "@zereight/mcp-gitlab"
