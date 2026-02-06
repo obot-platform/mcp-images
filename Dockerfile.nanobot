@@ -3,7 +3,7 @@ FROM ${BASE_IMAGE}
 
 USER root
 
-COPY --from=ghcr.io/nanobot-ai/nanobot:v0.0.51 /usr/local/bin/nanobot /usr/local/bin/
+COPY --from=ghcr.io/nanobot-ai/nanobot:v0.0.55 /usr/local/bin/nanobot /usr/local/bin/
 
 COPY ./scripts/nanobot.sh /usr/local/bin/nanobot.sh
 
