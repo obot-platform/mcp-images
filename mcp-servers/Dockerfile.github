@@ -1,6 +1,6 @@
-FROM ghcr.io/github/github-mcp-server as binary
+FROM ghcr.io/github/github-mcp-server AS binary
 
-FROM ghcr.io/nanobot-ai/nanobot:v0.0.41
+FROM ghcr.io/nanobot-ai/nanobot:v0.0.55
 
 COPY --from=binary /server/github-mcp-server .
 
@@ -25,6 +25,6 @@ RUN chown 1000 nanobot.yaml
 
 ENTRYPOINT ["nanobot"]
 
-CMD ["run", "--listen-address", ":8099", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "-e", "GITHUB_TOOLSETS", "-e", "GITHUB_DYNAMIC_TOOLSETS", "-e", "GITHUB_HOST", "./nanobot.yaml"]
+CMD ["run", "--listen-address", ":8099", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "-e", "GITHUB_TOOLSETS", "-e", "GITHUB_DYNAMIC_TOOLSETS", "-e", "GITHUB_HOST", "--config", "./nanobot.yaml"]
 
 USER 1000

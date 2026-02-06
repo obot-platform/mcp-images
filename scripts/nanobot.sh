@@ -46,4 +46,4 @@ fi
 # Write the YAML file
 echo "$yaml_content" > /home/user/nanobot.yaml
 
-nanobot run --listen-address :8099 ${nanobot_args} /home/user/nanobot.yaml
+nanobot run --listen-address :8099 ${nanobot_args} --config /home/user/nanobot.yaml
