@@ -10,7 +10,7 @@ images:
   - name: aws-cdk
     type: python
     package: awslabs.cdk-mcp-server
-    version: 1.0.10
+    version: 1.0.13
   - name: aws-documentation
     type: python
     package: awslabs.aws-documentation-mcp-server
