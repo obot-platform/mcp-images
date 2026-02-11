@@ -98,7 +98,7 @@ images:
   - name: supabase
     type: node
     package: "@supabase/mcp-server-supabase"
-    version: 0.5.10
+    version: 0.6.1
   - name: digitalocean
     type: node
     package: "@digitalocean/mcp"
