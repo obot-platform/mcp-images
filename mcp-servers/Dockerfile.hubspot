@@ -30,7 +30,7 @@ EOF
 
 RUN chown 1000 /nanobot.yaml
 
-COPY --from=ghcr.io/nanobot-ai/nanobot:v0.0.55 /usr/local/bin/nanobot /usr/local/bin/
+COPY --from=ghcr.io/nanobot-ai/nanobot:v0.0.58 /usr/local/bin/nanobot /usr/local/bin/
 
 ENTRYPOINT ["nanobot"]
 
