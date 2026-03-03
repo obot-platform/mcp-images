@@ -4,6 +4,7 @@ permissions:
   packages: write
   actions: read
   security-events: write
+  id-token: write
 on:
   workflow_call:
   workflow_dispatch:
