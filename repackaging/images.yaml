@@ -90,7 +90,7 @@ images:
   - name: playwright
     type: node
     package: "@playwright/mcp"
-    version: 0.0.52
+    version: 0.0.63
   - name: postgresql
     type: python
     package: postgres-mcp
