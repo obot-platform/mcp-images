@@ -14,7 +14,7 @@ images:
   - name: aws-documentation
     type: python
     package: awslabs.aws-documentation-mcp-server
-    version: 1.1.13
+    version: 1.1.18
   - name: aws-eks
     type: python
     package: awslabs.eks-mcp-server
