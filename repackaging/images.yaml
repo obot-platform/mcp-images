@@ -50,7 +50,7 @@ images:
   - name: duckduckgo-search
     type: python
     package: duckduckgo-mcp-server
-    version: 0.1.1
+    version: 0.1.2
   - name: exa-search
     type: node
     package: exa-mcp-server
