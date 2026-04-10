@@ -1,9 +1,4 @@
 name: Repackage MCP Images
-permissions:
-  contents: write
-  packages: write
-  actions: read
-  security-events: write
 
 on:
   workflow_call:
@@ -31,6 +26,11 @@ jobs:
           echo "matrix=$matrix" >> $GITHUB_OUTPUT
 
   repackage:
+    permissions:
+      contents: read
+      packages: write
+      actions: read
+      id-token: write
     needs: generate-matrix
     strategy:
       fail-fast: false
@@ -131,11 +131,15 @@ jobs:
           crane copy ${{ matrix.package }}:${{ matrix.version }} ghcr.io/${{ github.repository }}/${{ matrix.name }}:${{ matrix.version }}
 
       - name: Install Cosign
-        uses: sigstore/cosign-installer@v3.8.1
+        uses: sigstore/cosign-installer@v4.1.1
         with:
-          cosign-release: "v2.4.3"
+          cosign-release: "v3.0.5"
 
       - name: Sign image
+        permissions:
+          contents: read
+          packages: write
+          id-token: write
         if: ${{ matrix.type == 'node' && steps.check-image.outputs.exists == 'false' }}
         env:
           DIGEST: ${{ steps.build-final.outputs.digest }}
@@ -149,22 +153,6 @@ jobs:
             fi
           done
           cosign sign --yes ${images}
-
-      - name: Run Trivy
-        if: steps.check-image.outputs.exists == 'true' || steps.build-final.outputs.digest != ''
-        uses: aquasecurity/trivy-action@0.35.0
-        with:
-          image-ref: ghcr.io/${{ github.repository }}/${{ matrix.name }}:${{ matrix.version }}
-          skip-dirs: "**/venv,**/.local/share/uv/tools"
-          format: "sarif"
-          output: "trivy-results-${{ matrix.name }}-${{ matrix.version }}.sarif"
-
-      - name: Upload SARIF file
-        if: steps.check-image.outputs.exists == 'true' || steps.build-final.outputs.digest != ''
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          category: trivy-${{ matrix.name }}-${{ matrix.version }}
-          sarif_file: trivy-results-${{ matrix.name }}-${{ matrix.version }}.sarif
 
       - name: Generate SBOM
         if: steps.check-image.outputs.exists == 'true'
@@ -190,3 +178,31 @@ jobs:
               "package": "${{ matrix.package }}",
               "type": "${{ matrix.type }}"
             }
+
+  trivy-scan:
+    permissions:
+    contents: read
+    packages: read
+    security-events: write
+    needs: [generate-matrix, repackage]
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run Trivy
+        if: steps.check-image.outputs.exists == 'true' || steps.build-final.outputs.digest != ''
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          image-ref: ghcr.io/${{ github.repository }}/${{ matrix.name }}:${{ matrix.version }}
+          skip-dirs: "**/venv,**/.local/share/uv/tools"
+          format: "sarif"
+          output: "trivy-results-${{ matrix.name }}-${{ matrix.version }}.sarif"
+
+      - name: Upload SARIF file
+        if: steps.check-image.outputs.exists == 'true' || steps.build-final.outputs.digest != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          category: trivy-${{ matrix.name }}-${{ matrix.version }}
+          sarif_file: trivy-results-${{ matrix.name }}-${{ matrix.version }}.sarif

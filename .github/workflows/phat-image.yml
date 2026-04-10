@@ -1,9 +1,5 @@
 name: Build and Push Phat Image
-permissions:
-  contents: read
-  packages: write
-  actions: read
-  security-events: write
+
 on:
   workflow_call:
   workflow_dispatch:
@@ -16,6 +12,11 @@ on:
       - Dockerfile.phat
 jobs:
   docker-build:
+    permissions:
+      contents: read
+      packages: write
+      actions: read
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -47,12 +48,16 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository }}/${{ matrix.image-identifier }}:${{ github.ref_name }}
       - name: Install Cosign
-        uses: sigstore/cosign-installer@v3.8.1
+        uses: sigstore/cosign-installer@v4.1.1
         with:
-          cosign-release: "v2.4.3"
+          cosign-release: "v3.0.5"
       - name: Check install!
         run: cosign version
       - name: Sign Images
+        permissions:
+          contents: read
+          packages: write
+          id-token: write
         env:
           DIGEST: ${{ steps.build-and-push.outputs.digest }}
           TAGS: |
@@ -69,6 +74,21 @@ jobs:
         if: ${{ github.ref_type == 'tag' && !contains(github.ref_name, '-rc') }}
         run: |
           crane tag ghcr.io/${{ github.repository }}/${{ matrix.image-identifier }}:${{ github.ref_name }} latest
+
+  trivy-scan:
+    permissions:
+    contents: read
+    packages: read
+    security-events: write
+    needs: docker-build
+    strategy:
+      fail-fast: false
+      matrix:
+        image-identifier:
+          - base-python
+          - base-node
+    runs-on: ubuntu-latest
+    steps:
       - name: Run Trivy
         uses: aquasecurity/trivy-action@0.35.0
         with:

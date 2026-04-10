@@ -1,9 +1,5 @@
 name: Build and Push Base Images
-permissions:
-  contents: read
-  packages: write
-  actions: read
-  security-events: write
+
 on:
   workflow_call:
   workflow_dispatch:
@@ -17,6 +13,11 @@ on:
       - Dockerfile.base-node
 jobs:
   docker-build:
+    permissions:
+      contents: read
+      packages: write
+      actions: read
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -55,10 +56,6 @@ jobs:
       - name: Check install!
         run: cosign version
       - name: Sign Images
-        permissions:
-          contents: read
-          packages: write
-          id-token: write
         env:
           DIGEST: ${{ steps.build-and-push.outputs.digest }}
           TAGS: |
@@ -75,6 +72,21 @@ jobs:
         if: ${{ github.ref_type == 'tag' && !contains(github.ref_name, '-rc') }}
         run: |
           crane tag ghcr.io/${{ github.repository }}/${{ matrix.image-identifier }}:${{ github.ref_name }} latest
+
+  trivy-scan:
+    permissions:
+    contents: read
+    packages: read
+    security-events: write
+    needs: docker-build
+    strategy:
+      fail-fast: false
+      matrix:
+        image-identifier:
+          - base-python
+          - base-node
+    runs-on: ubuntu-latest
+    steps:
       - name: Run Trivy
         uses: aquasecurity/trivy-action@0.35.0
         with:
