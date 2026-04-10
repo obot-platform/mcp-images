@@ -54,10 +54,6 @@ jobs:
       - name: Check install!
         run: cosign version
       - name: Sign Images
-        permissions:
-          contents: read
-          packages: write
-          id-token: write
         env:
           DIGEST: ${{ steps.build-and-push.outputs.digest }}
           TAGS: |
