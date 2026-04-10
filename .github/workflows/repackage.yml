@@ -136,10 +136,6 @@ jobs:
           cosign-release: "v3.0.5"
 
       - name: Sign image
-        permissions:
-          contents: read
-          packages: write
-          id-token: write
         if: ${{ matrix.type == 'node' && steps.check-image.outputs.exists == 'false' }}
         env:
           DIGEST: ${{ steps.build-final.outputs.digest }}
@@ -181,9 +177,9 @@ jobs:
 
   trivy-scan:
     permissions:
-    contents: read
-    packages: read
-    security-events: write
+      contents: read
+      packages: read
+      security-events: write
     needs: [generate-matrix, repackage]
     strategy:
       fail-fast: false
