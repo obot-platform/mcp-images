@@ -1,4 +1,4 @@
-name: Build and Push Phat Image
+name: Build and Push STDIO Wrapper Image
 
 on:
   workflow_call:
@@ -9,7 +9,7 @@ on:
     tags:
       - "v*"
     paths:
-      - Dockerfile.phat
+      - Dockerfile.stdio-wrapper
 jobs:
   docker-build:
     permissions:
@@ -21,7 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         image-identifier:
-          - phat
+          - stdio-wrapper
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
