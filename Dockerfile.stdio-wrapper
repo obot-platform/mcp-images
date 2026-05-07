@@ -1,4 +1,4 @@
-FROM ghcr.io/nanobot-ai/nanobot:v0.0.76
+FROM ghcr.io/obot-platform/nanobot:v0.0.80
 
 USER root
 
