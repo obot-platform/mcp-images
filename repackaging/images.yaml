@@ -98,7 +98,7 @@ images:
   - name: digitalocean
     type: node
     package: "@digitalocean/mcp"
-    version: 1.0.42
+    version: 1.0.56
   - name: markitdown-mcp
     type: python
     package: markitdown-mcp
