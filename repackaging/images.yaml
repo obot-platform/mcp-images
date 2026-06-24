@@ -120,4 +120,4 @@ images:
   - name: terraform
     type: docker
     package: hashicorp/terraform-mcp-server
-    version: 0.5.1
+    version: 0.5.2
