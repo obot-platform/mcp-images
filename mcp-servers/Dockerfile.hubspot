@@ -34,6 +34,6 @@ COPY --from=ghcr.io/obot-platform/nanobot:v0.0.89 /usr/local/bin/nanobot /usr/lo
 
 ENTRYPOINT ["nanobot"]
 
-CMD ["run", "--listen-address", ":8099", "-e", "PRIVATE_APP_ACCESS_TOKEN", "--config", "/nanobot.yaml", "--disable-ui", "--exclude-built-in-agents"]
+CMD ["run", "--listen-address", ":8099", "-e", "PRIVATE_APP_ACCESS_TOKEN", "--config", "/nanobot.yaml", "--exclude-built-in-agents"]
 
 USER 1000
