@@ -4,12 +4,20 @@
   "private": true,
   "type": "module",
   "main": "server.js",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.24.0",
-    "express": "^5.1.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "express": "^5.2.1",
     "zod": "^3.25.76"
+  },
+  "overrides": {
+    "@modelcontextprotocol/sdk": {
+      "@hono/node-server": "^2.0.5"
+    }
   }
 }
