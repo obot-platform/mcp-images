@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "main": "server.js",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node server.js"
   },
@@ -13,6 +16,8 @@
     "zod": "^3.25.76"
   },
   "overrides": {
-    "@hono/node-server": "^2.0.5"
+    "@modelcontextprotocol/sdk": {
+      "@hono/node-server": "^2.0.5"
+    }
   }
 }
