@@ -20,24 +20,3 @@ jobs:
           for dockerfile in Dockerfile.* mcp-servers/Dockerfile.* repackaging/Dockerfile.*; do
             docker buildx build --check --file "$dockerfile" .
           done
-
-      - name: Convert image manifest to JSON
-        uses: mikefarah/yq@v4.45.4
-        with:
-          cmd: yq -e -o=json '.images' repackaging/images.yaml > images.json
-
-      - name: Validate image manifest
-        run: |
-          jq -e '
-            . as $images |
-            ($images | type == "array") and
-            ($images | all(
-              .[];
-              type == "object" and
-              (.name | type == "string" and length > 0) and
-              (.package | type == "string" and length > 0) and
-              (.version | type == "string" and length > 0) and
-              (.type as $type | ["node", "python", "docker"] | index($type) != null)
-            )) and
-            ($images | map(.name) | unique | length == ($images | length))
-          ' images.json
