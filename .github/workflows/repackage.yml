@@ -152,12 +152,12 @@ jobs:
 
       - name: Generate SBOM
         if: steps.check-image.outputs.exists == 'true'
-        uses: anchore/sbom-action@v0.20.6
+        uses: anchore/sbom-action@v0.24.0
         with:
           image: ghcr.io/${{ github.repository }}/${{ matrix.name }}:${{ matrix.version }}
           artifact-name: sbom-${{ matrix.name }}-${{ matrix.version }}.spdx.json
-          dependency-snapshot: true
-          upload-artifact-retention: 90
+          dependency-snapshot: false
+          upload-artifact-retention: 30
 
       - name: trigger catalog update
         if: steps.check-image.outputs.exists == 'false'
