@@ -3,6 +3,8 @@ name: Repackage MCP Images
 on:
   workflow_call:
   workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"
   push:
     branches:
       - main
@@ -10,12 +12,16 @@ on:
       - "v*"
     paths:
       - repackaging/**
+      - Dockerfile.nanobot
+      - .github/workflows/repackage.yml
+      - scripts/submit-empty-dependency-snapshot.sh
 
 jobs:
   generate-matrix:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
+      retired-matrix: ${{ steps.set-matrix.outputs.retired-matrix }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -23,7 +29,19 @@ jobs:
         id: set-matrix
         run: |
           matrix=$(yq eval -o=json '.images[] |select(.type != null) |= pick(["name", "type", "package","version","constraints"])' repackaging/images.yaml |jq -cs .)
+          retired_matrix=$(yq eval -o=json '.images' repackaging/retired-images.yaml | jq -c 'map({"name": .})')
+
+          duplicates=$(jq -nr \
+            --argjson active "$matrix" \
+            --argjson retired "$retired_matrix" \
+            '[$active[].name] - ([$active[].name] - [$retired[].name]) | unique | join(", ")')
+          if [ -n "$duplicates" ]; then
+            echo "Images cannot be both active and retired: $duplicates" >&2
+            exit 1
+          fi
+
           echo "matrix=$matrix" >> $GITHUB_OUTPUT
+          echo "retired-matrix=$retired_matrix" >> $GITHUB_OUTPUT
 
   repackage:
     permissions:
@@ -72,7 +90,7 @@ jobs:
           fi
 
       - name: Build and push python-based base image
-        if: ${{ matrix.type == 'python' && steps.check-image.outputs.exists == 'false' }}
+        if: ${{ github.event_name != 'schedule' && matrix.type == 'python' && steps.check-image.outputs.exists == 'false' }}
         uses: docker/build-push-action@v6
         id: build-python-base
         with:
@@ -90,7 +108,7 @@ jobs:
             ghcr.io/${{ github.repository }}/${{ matrix.name }}-base:${{ matrix.version }}
 
       - name: Build and push node-based base image
-        if: ${{ matrix.type == 'node' && steps.check-image.outputs.exists == 'false' }}
+        if: ${{ github.event_name != 'schedule' && matrix.type == 'node' && steps.check-image.outputs.exists == 'false' }}
         uses: docker/build-push-action@v6
         id: build-node-base
         with:
@@ -107,7 +125,7 @@ jobs:
             ghcr.io/${{ github.repository }}/${{ matrix.name }}-base:${{ matrix.version }}
 
       - name: Build final image
-        if: ${{ matrix.type == 'node' || matrix.type == 'python' }}
+        if: ${{ github.event_name != 'schedule' && (matrix.type == 'node' || matrix.type == 'python') }}
         uses: docker/build-push-action@v6
         id: build-final
         with:
@@ -126,17 +144,18 @@ jobs:
         uses: imjasonh/setup-crane@v0.4
 
       - name: Retag existing docker image
-        if: ${{ matrix.type == 'docker' && steps.check-image.outputs.exists == 'false' }}
+        if: ${{ github.event_name != 'schedule' && matrix.type == 'docker' && steps.check-image.outputs.exists == 'false' }}
         run: |
           crane copy ${{ matrix.package }}:${{ matrix.version }} ghcr.io/${{ github.repository }}/${{ matrix.name }}:${{ matrix.version }}
 
       - name: Install Cosign
+        if: ${{ github.event_name != 'schedule' && matrix.type == 'node' && steps.check-image.outputs.exists == 'false' }}
         uses: sigstore/cosign-installer@v4.1.1
         with:
           cosign-release: "v3.0.5"
 
       - name: Sign image
-        if: ${{ matrix.type == 'node' && steps.check-image.outputs.exists == 'false' }}
+        if: ${{ github.event_name != 'schedule' && matrix.type == 'node' && steps.check-image.outputs.exists == 'false' }}
         env:
           DIGEST: ${{ steps.build-final.outputs.digest }}
           TAGS: |
@@ -151,16 +170,16 @@ jobs:
           cosign sign --yes ${images}
 
       - name: Generate SBOM
-        if: steps.check-image.outputs.exists == 'true'
         uses: anchore/sbom-action@v0.24.0
         with:
           image: ghcr.io/${{ github.repository }}/${{ matrix.name }}:${{ matrix.version }}
-          artifact-name: sbom-${{ matrix.name }}-${{ matrix.version }}.spdx.json
+          # anchore/sbom-action includes this in its dependency snapshot correlator.
+          artifact-name: sbom-${{ matrix.name }}.spdx.json
           dependency-snapshot: false
           upload-artifact-retention: 30
 
       - name: trigger catalog update
-        if: steps.check-image.outputs.exists == 'false'
+        if: ${{ github.event_name != 'schedule' && steps.check-image.outputs.exists == 'false' }}
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.DISPATCH_PAT }}
@@ -188,7 +207,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run Trivy
-        if: steps.check-image.outputs.exists == 'true' || steps.build-final.outputs.digest != ''
         uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: ghcr.io/${{ github.repository }}/${{ matrix.name }}:${{ matrix.version }}
@@ -197,8 +215,25 @@ jobs:
           output: "trivy-results-${{ matrix.name }}-${{ matrix.version }}.sarif"
 
       - name: Upload SARIF file
-        if: steps.check-image.outputs.exists == 'true' || steps.build-final.outputs.digest != ''
         uses: github/codeql-action/upload-sarif@v3
         with:
-          category: trivy-${{ matrix.name }}-${{ matrix.version }}
+          category: trivy-${{ matrix.name }}
           sarif_file: trivy-results-${{ matrix.name }}-${{ matrix.version }}.sarif
+
+  retire-dependency-snapshots:
+    permissions:
+      contents: write
+    needs: [generate-matrix, repackage]
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.generate-matrix.outputs.retired-matrix) }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Retire dependency snapshot
+        run: |
+          scripts/submit-empty-dependency-snapshot.sh \
+            "Repackage MCP Images_repackage_sbom-${{ matrix.name }}.spdx.json"
