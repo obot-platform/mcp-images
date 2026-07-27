@@ -3,8 +3,6 @@ name: Repackage MCP Images
 on:
   workflow_call:
   workflow_dispatch:
-  schedule:
-    - cron: "0 6 * * 1"
   push:
     branches:
       - main
@@ -13,8 +11,6 @@ on:
     paths:
       - repackaging/**
       - Dockerfile.nanobot
-      - .github/workflows/repackage.yml
-      - scripts/submit-empty-dependency-snapshot.sh
 
 jobs:
   generate-matrix:
@@ -90,7 +86,7 @@ jobs:
           fi
 
       - name: Build and push python-based base image
-        if: ${{ github.event_name != 'schedule' && matrix.type == 'python' && steps.check-image.outputs.exists == 'false' }}
+        if: ${{ matrix.type == 'python' && steps.check-image.outputs.exists == 'false' }}
         uses: docker/build-push-action@v6
         id: build-python-base
         with:
@@ -108,7 +104,7 @@ jobs:
             ghcr.io/${{ github.repository }}/${{ matrix.name }}-base:${{ matrix.version }}
 
       - name: Build and push node-based base image
-        if: ${{ github.event_name != 'schedule' && matrix.type == 'node' && steps.check-image.outputs.exists == 'false' }}
+        if: ${{ matrix.type == 'node' && steps.check-image.outputs.exists == 'false' }}
         uses: docker/build-push-action@v6
         id: build-node-base
         with:
@@ -125,7 +121,7 @@ jobs:
             ghcr.io/${{ github.repository }}/${{ matrix.name }}-base:${{ matrix.version }}
 
       - name: Build final image
-        if: ${{ github.event_name != 'schedule' && (matrix.type == 'node' || matrix.type == 'python') }}
+        if: ${{ matrix.type == 'node' || matrix.type == 'python' }}
         uses: docker/build-push-action@v6
         id: build-final
         with:
@@ -144,18 +140,17 @@ jobs:
         uses: imjasonh/setup-crane@v0.4
 
       - name: Retag existing docker image
-        if: ${{ github.event_name != 'schedule' && matrix.type == 'docker' && steps.check-image.outputs.exists == 'false' }}
+        if: ${{ matrix.type == 'docker' && steps.check-image.outputs.exists == 'false' }}
         run: |
           crane copy ${{ matrix.package }}:${{ matrix.version }} ghcr.io/${{ github.repository }}/${{ matrix.name }}:${{ matrix.version }}
 
       - name: Install Cosign
-        if: ${{ github.event_name != 'schedule' && matrix.type == 'node' && steps.check-image.outputs.exists == 'false' }}
         uses: sigstore/cosign-installer@v4.1.1
         with:
           cosign-release: "v3.0.5"
 
       - name: Sign image
-        if: ${{ github.event_name != 'schedule' && matrix.type == 'node' && steps.check-image.outputs.exists == 'false' }}
+        if: ${{ matrix.type == 'node' && steps.check-image.outputs.exists == 'false' }}
         env:
           DIGEST: ${{ steps.build-final.outputs.digest }}
           TAGS: |
@@ -179,7 +174,7 @@ jobs:
           upload-artifact-retention: 30
 
       - name: trigger catalog update
-        if: ${{ github.event_name != 'schedule' && steps.check-image.outputs.exists == 'false' }}
+        if: steps.check-image.outputs.exists == 'false'
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.DISPATCH_PAT }}
