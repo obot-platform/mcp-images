@@ -17,7 +17,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
-      retired-matrix: ${{ steps.set-matrix.outputs.retired-matrix }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -25,19 +24,7 @@ jobs:
         id: set-matrix
         run: |
           matrix=$(yq eval -o=json '.images[] |select(.type != null) |= pick(["name", "type", "package","version","constraints"])' repackaging/images.yaml |jq -cs .)
-          retired_matrix=$(yq eval -o=json '.images' repackaging/retired-images.yaml | jq -c 'map({"name": .})')
-
-          duplicates=$(jq -nr \
-            --argjson active "$matrix" \
-            --argjson retired "$retired_matrix" \
-            '[$active[].name] - ([$active[].name] - [$retired[].name]) | unique | join(", ")')
-          if [ -n "$duplicates" ]; then
-            echo "Images cannot be both active and retired: $duplicates" >&2
-            exit 1
-          fi
-
           echo "matrix=$matrix" >> $GITHUB_OUTPUT
-          echo "retired-matrix=$retired_matrix" >> $GITHUB_OUTPUT
 
   repackage:
     permissions:
@@ -168,8 +155,7 @@ jobs:
         uses: anchore/sbom-action@v0.24.0
         with:
           image: ghcr.io/${{ github.repository }}/${{ matrix.name }}:${{ matrix.version }}
-          # anchore/sbom-action includes this in its dependency snapshot correlator.
-          artifact-name: sbom-${{ matrix.name }}.spdx.json
+          artifact-name: sbom-${{ matrix.name }}-${{ matrix.version }}.spdx.json
           dependency-snapshot: false
           upload-artifact-retention: 30
 
@@ -214,21 +200,3 @@ jobs:
         with:
           category: trivy-${{ matrix.name }}
           sarif_file: trivy-results-${{ matrix.name }}-${{ matrix.version }}.sarif
-
-  retire-dependency-snapshots:
-    permissions:
-      contents: write
-    needs: [generate-matrix, repackage]
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJson(needs.generate-matrix.outputs.retired-matrix) }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Retire dependency snapshot
-        run: |
-          scripts/submit-empty-dependency-snapshot.sh \
-            "Repackage MCP Images_repackage_sbom-${{ matrix.name }}.spdx.json"

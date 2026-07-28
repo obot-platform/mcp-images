@@ -1,4 +1,0 @@
-# Keep retired names here so their stable dependency snapshots remain empty.
-images:
-  - tavily
-  - wordpress
