@@ -22,3 +22,31 @@ jobs:
           for dockerfile in Dockerfile.* mcp-servers/Dockerfile.* repackaging/Dockerfile.*; do
             docker buildx build --check --file "$dockerfile" .
           done
+
+      - name: Build HubSpot image
+        run: docker build --pull --file mcp-servers/Dockerfile.hubspot --tag hubspot:pr-check .
+
+      - name: Audit HubSpot production dependencies
+        run: docker run --rm --entrypoint npm hubspot:pr-check audit --omit=dev
+
+      - name: Smoke test HubSpot MCP server
+        shell: bash
+        run: |
+          set -o pipefail
+
+          responses=$(
+            printf '%s\n' \
+              '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"smoke-test","version":"1"}}}' \
+              '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}' \
+              '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' |
+              docker run --rm --interactive \
+                --entrypoint node \
+                --env PRIVATE_APP_ACCESS_TOKEN=smoke-test \
+                hubspot:pr-check \
+                /app/dist/index.js
+          )
+
+          jq --exit-status --slurp '
+            any(.[]; .id == 1 and .result.protocolVersion != null) and
+            any(.[]; .id == 2 and (.result.tools | length > 0))
+          ' <<<"$responses"
