@@ -11,6 +11,7 @@ on:
     paths:
       - repackaging/**
       - Dockerfile.nanobot
+      - .github/workflows/repackage.yml
 
 jobs:
   generate-matrix:
@@ -32,6 +33,7 @@ jobs:
       packages: write
       actions: read
       id-token: write
+      security-events: write
     needs: generate-matrix
     strategy:
       fail-fast: false
@@ -123,13 +125,24 @@ jobs:
             ghcr.io/${{ github.repository }}/${{ matrix.name }}:${{ matrix.version }}
 
       - name: Setup crane
-        if: ${{ matrix.type == 'docker' }}
         uses: imjasonh/setup-crane@v0.4
 
       - name: Retag existing docker image
         if: ${{ matrix.type == 'docker' && steps.check-image.outputs.exists == 'false' }}
         run: |
           crane copy ${{ matrix.package }}:${{ matrix.version }} ghcr.io/${{ github.repository }}/${{ matrix.name }}:${{ matrix.version }}
+
+      - name: Resolve image digest
+        id: image
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}/${{ matrix.name }}:${{ matrix.version }}
+          BUILD_DIGEST: ${{ steps.build-final.outputs.digest }}
+        run: |
+          digest="$BUILD_DIGEST"
+          if [ -z "$digest" ]; then
+            digest=$(crane digest "$IMAGE")
+          fi
+          echo "ref=${IMAGE%:*}@${digest}" >> "$GITHUB_OUTPUT"
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@v4.1.1
@@ -154,10 +167,25 @@ jobs:
       - name: Generate SBOM
         uses: anchore/sbom-action@v0.24.0
         with:
-          image: ghcr.io/${{ github.repository }}/${{ matrix.name }}:${{ matrix.version }}
+          image: ${{ steps.image.outputs.ref }}
           artifact-name: sbom-${{ matrix.name }}-${{ matrix.version }}.spdx.json
           dependency-snapshot: false
           upload-artifact-retention: 30
+
+      - name: Run Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.ref }}
+          skip-dirs: "**/venv"
+          format: "sarif"
+          output: "trivy-results-${{ matrix.name }}.sarif"
+          exit-code: "0"
+
+      - name: Upload SARIF file
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          category: trivy-${{ matrix.name }}
+          sarif_file: trivy-results-${{ matrix.name }}.sarif
 
       - name: trigger catalog update
         if: steps.check-image.outputs.exists == 'false'
@@ -174,29 +202,3 @@ jobs:
               "package": "${{ matrix.package }}",
               "type": "${{ matrix.type }}"
             }
-
-  trivy-scan:
-    permissions:
-      contents: read
-      packages: read
-      security-events: write
-    needs: [generate-matrix, repackage]
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Run Trivy
-        uses: aquasecurity/trivy-action@0.35.0
-        with:
-          image-ref: ghcr.io/${{ github.repository }}/${{ matrix.name }}:${{ matrix.version }}
-          skip-dirs: "**/venv,**/.local/share/uv/tools"
-          format: "sarif"
-          output: "trivy-results-${{ matrix.name }}-${{ matrix.version }}.sarif"
-
-      - name: Upload SARIF file
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          category: trivy-${{ matrix.name }}
-          sarif_file: trivy-results-${{ matrix.name }}-${{ matrix.version }}.sarif
