@@ -1,0 +1,7 @@
+
+# Dependabot dependency ownership
+/http-webhook-mcp-converter/package-lock.json @obot-platform/obot-backend
+/http-webhook-mcp-converter/package.json @obot-platform/obot-backend
+/hubspot/package-lock.json @obot-platform/obot-backend
+/hubspot/package.json @obot-platform/obot-backend
+/scripts/check-versions/requirements.txt @obot-platform/obot-backend
