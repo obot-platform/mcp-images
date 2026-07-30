@@ -12,6 +12,7 @@ on:
       - mcp-servers/**
       - http-webhook-mcp-converter/**
       - hubspot/**
+      - .github/workflows/mcp-servers.yml
 jobs:
   docker-build:
     permissions:
@@ -19,6 +20,7 @@ jobs:
       packages: write
       actions: read
       id-token: write
+      security-events: write
     strategy:
       fail-fast: false
       matrix:
@@ -72,35 +74,22 @@ jobs:
             images+="${tag}@${DIGEST} "
           done
           cosign sign --yes ${images}
+      - name: Run Trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ghcr.io/${{ github.repository }}/${{ matrix.image-identifier }}@${{ steps.build-and-push.outputs.digest }}
+          skip-dirs: "**/venv"
+          format: "sarif"
+          output: "trivy-results-${{ matrix.image-identifier }}.sarif"
+          exit-code: "0"
+      - name: Upload SARIF file
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          category: trivy-${{ matrix.image-identifier }}
+          sarif_file: trivy-results-${{ matrix.image-identifier }}.sarif
       - name: Setup crane
         uses: imjasonh/setup-crane@v0.4
       - name: Copy image to latest tag
         if: ${{ github.ref_type == 'tag' && !contains(github.ref_name, '-rc') }}
         run: |
           crane tag ghcr.io/${{ github.repository }}/${{ matrix.image-identifier }}:${{ github.ref_name }} latest
-
-  trivy-scan:
-    permissions:
-      contents: read
-      packages: read
-      security-events: write
-    needs: docker-build
-    strategy:
-      fail-fast: false
-      matrix:
-        image-identifier:
-          - base-python
-          - base-node
-    runs-on: ubuntu-latest
-    steps:
-      - name: Run Trivy
-        uses: aquasecurity/trivy-action@0.35.0
-        with:
-          image-ref: ghcr.io/${{ github.repository }}/${{ matrix.image-identifier }}:${{ github.ref_name }}
-          skip-dirs: "**/venv"
-          format: "sarif"
-          output: "trivy-results-${{ matrix.image-identifier }}.sarif"
-      - name: Upload SARIF file
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: trivy-results-${{ matrix.image-identifier }}.sarif
