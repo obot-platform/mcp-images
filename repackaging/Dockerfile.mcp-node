@@ -1,5 +1,5 @@
-ARG BASE_TAG=main
-FROM ghcr.io/obot-platform/mcp-images/base-node:${BASE_TAG}
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
 
 ARG MCP_PACKAGE
 ARG MCP_VERSION

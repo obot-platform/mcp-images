@@ -1,0 +1,104 @@
+name: Check Upstream Changes
+
+on:
+  schedule:
+    - cron: "0 9 * * 1" # Every Monday at 9 AM UTC
+  workflow_dispatch:
+
+jobs:
+  sync-upstream:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout our repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.DISPATCH_PAT }}
+
+      - name: Add upstream remote and fetch
+        run: |
+          git remote add upstream https://github.com/obot-platform/mcp-images.git
+          git fetch upstream main
+
+      - name: Check for changes
+        id: check
+        run: |
+          DIFF=$(git diff HEAD..upstream/main 2>/dev/null)
+          if [ -z "$DIFF" ]; then
+            echo "No upstream changes"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "Upstream changes detected"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create sync branch with upstream changes
+        if: steps.check.outputs.has_changes == 'true'
+        run: |
+          BRANCH="sync/upstream-$(date +%Y%m%d)"
+
+          # Check if branch already exists remotely
+          if git ls-remote --heads origin "$BRANCH" | grep -q "$BRANCH"; then
+            echo "Branch $BRANCH already exists, deleting it"
+            git push origin --delete "$BRANCH"
+          fi
+
+          # Create branch from upstream/main
+          git checkout -b "$BRANCH" upstream/main
+
+          # Restore OUR workflow files (don't overwrite with theirs)
+          git checkout main -- .github/workflows/
+
+          # Restore our Dockerfile modifications
+          git checkout main -- repackaging/Dockerfile.mcp-node
+          git checkout main -- repackaging/Dockerfile.mcp-python
+          git checkout main -- mcp-servers/Dockerfile.hubspot
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: sync upstream changes from obot-platform/mcp-images" --allow-empty
+          git push origin "$BRANCH"
+
+          echo "BRANCH=$BRANCH" >> $GITHUB_ENV
+
+      - name: Create Pull Request
+        if: steps.check.outputs.has_changes == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.DISPATCH_PAT }}
+        run: |
+          # Close any existing sync PR
+          EXISTING=$(gh pr list --search "chore: sync upstream" --state open --json number --jq '.[0].number' 2>/dev/null)
+          if [ -n "$EXISTING" ]; then
+            gh pr close "$EXISTING" --comment "Superseded by new sync check."
+          fi
+
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore: sync upstream changes from obot-platform/mcp-images" \
+            --body "## Upstream Sync
+
+          This PR contains all changes from [obot-platform/mcp-images](https://github.com/obot-platform/mcp-images) that we don't have yet.
+
+          **Our modifications are preserved:**
+          - \`.github/workflows/\` (our OCIR workflows kept)
+          - \`repackaging/Dockerfile.mcp-node\` (our BASE_IMAGE arg kept)
+          - \`repackaging/Dockerfile.mcp-python\` (our BASE_IMAGE arg kept)
+          - \`mcp-servers/Dockerfile.hubspot\` (our BASE_IMAGE arg kept)
+
+          **Review the diff** for:
+          - New servers or version bumps in \`images.yaml\`
+          - New/updated Dockerfiles in \`mcp-servers/\`
+          - Changes to base Dockerfiles, scripts, or source code
+          - Check upstream workflows separately for cosign/trivy version updates: [upstream workflows](https://github.com/obot-platform/mcp-images/tree/main/.github/workflows)
+
+          **Options:**
+          - Merge fully if all changes are wanted
+          - Edit specific files in this PR before merging
+          - Close without merging if nothing is needed
+
+          Full comparison: https://github.com/abluva/mcp-images/compare/main...obot-platform:mcp-images:main"
