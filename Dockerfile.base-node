@@ -1,19 +1,15 @@
 FROM cgr.dev/chainguard/wolfi-base:latest
 
 LABEL org.opencontainers.image.source="https://github.com/obot-platform/mcp-images" \
-      org.opencontainers.image.description="Node.js base image for MCP servers, including Chromium for Playwright/Puppeteer"
+      org.opencontainers.image.description="Node.js base image for MCP servers"
 
 USER root
 
-# Toolchain, Node, and Chromium (for Playwright/Puppeteer) in a single layer.
-# The chrome symlink is how Playwright's `chrome` channel finds the wolfi
-# chromium build. `npm install -g npm` must precede the /usr/local chown so the
-# upgraded npm ends up owned by uid 1000.
-RUN apk add --no-cache make git nodejs npm pnpm chromium && \
+# Toolchain and Node in a single layer. `npm install -g npm` must precede the
+# /usr/local chown so the upgraded npm ends up owned by uid 1000.
+RUN apk add --no-cache make git nodejs npm pnpm && \
     npm install -g npm && \
     npm cache clean --force && \
-    mkdir -p /opt/google/chrome && \
-    ln -sf /usr/bin/chromium-browser /opt/google/chrome/chrome && \
     mkdir -p /home/user/.npm /home/user/.local/bin && \
     chown -R 1000:0 /home/user && \
     chown -R 1000:0 /usr/local
@@ -21,5 +17,4 @@ RUN apk add --no-cache make git nodejs npm pnpm chromium && \
 USER 1000
 
 ENV HOME=/home/user \
-    PATH="/home/user/.local/bin:$PATH" \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+    PATH="/home/user/.local/bin:$PATH"
