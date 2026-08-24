@@ -15,12 +15,9 @@ USER root
 RUN npm ci --omit=dev --ignore-scripts && \
     npm cache clean --force
 
-RUN cat > /nanobot.yaml <<'EOF'
-publish:
-  mcpServers: [server]
-
-mcpServers:
-  server:
+RUN cat > /mmmcp.yaml <<'EOF'
+servers:
+  - name: HubSpot
     command: node
     args: [/app/dist/index.js]
     env:
@@ -28,12 +25,12 @@ mcpServers:
       PRIVATE_APP_ACCESS_TOKEN: ${PRIVATE_APP_ACCESS_TOKEN}
 EOF
 
-RUN chown 1000 /nanobot.yaml
+RUN chown 1000 /mmmcp.yaml
 
-COPY --from=ghcr.io/obot-platform/nanobot:v0.0.92 /usr/local/bin/nanobot /usr/local/bin/
+COPY --from=ghcr.io/obot-platform/mmmcp:v0.1.1 /usr/local/bin/mmmcp /usr/local/bin/
 
-ENTRYPOINT ["nanobot"]
+ENTRYPOINT ["mmmcp"]
 
-CMD ["run", "--listen-address", ":8099", "-e", "PRIVATE_APP_ACCESS_TOKEN", "--config", "/nanobot.yaml", "--disable-ui", "--exclude-built-in-agents"]
+CMD ["--listen", ":8099", "--config", "/mmmcp.yaml"]
 
 USER 1000

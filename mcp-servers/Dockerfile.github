@@ -1,17 +1,14 @@
 FROM ghcr.io/github/github-mcp-server AS binary
 
-FROM ghcr.io/obot-platform/nanobot:v0.0.92
+FROM ghcr.io/obot-platform/mmmcp:v0.1.1
 
 COPY --from=binary /server/github-mcp-server .
 
 USER root
 
-RUN cat > nanobot.yaml <<'EOF'
-publish:
-  mcpServers: [server]
-
-mcpServers:
-  server:
+RUN cat > mmmcp.yaml <<'EOF'
+servers:
+  - name: GitHub
     command: ./github-mcp-server
     args: [stdio]
     env:
@@ -21,10 +18,10 @@ mcpServers:
       GITHUB_HOST: ${GITHUB_HOST}
 EOF
 
-RUN chown 1000 nanobot.yaml
+RUN chown 1000 mmmcp.yaml
 
-ENTRYPOINT ["nanobot"]
+ENTRYPOINT ["mmmcp"]
 
-CMD ["run", "--listen-address", ":8099", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "-e", "GITHUB_TOOLSETS", "-e", "GITHUB_DYNAMIC_TOOLSETS", "-e", "GITHUB_HOST", "--config", "./nanobot.yaml", "--disable-ui", "--exclude-built-in-agents"]
+CMD ["--listen", ":8099", "--config", "./mmmcp.yaml"]
 
 USER 1000

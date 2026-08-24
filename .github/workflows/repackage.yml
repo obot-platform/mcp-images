@@ -114,7 +114,7 @@ jobs:
           context: .
           push: true
           pull: true
-          file: Dockerfile.nanobot
+          file: Dockerfile.mmmcp
           platforms: linux/amd64,linux/arm64
           build-args: |
             BASE_IMAGE=ghcr.io/${{ github.repository }}/${{ matrix.name }}-base:${{ matrix.version }}
