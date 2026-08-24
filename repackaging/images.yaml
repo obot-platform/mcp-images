@@ -46,7 +46,9 @@ images:
   - name: duckduckgo-search
     type: python
     package: duckduckgo-mcp-server
-    version: 0.6.1
+    version: 0.1.2
+    constraints:
+      - "mcp<2"
   - name: exa-search
     type: node
     package: exa-mcp-server
@@ -91,6 +93,8 @@ images:
     type: python
     package: postgres-mcp
     version: 0.3.0
+    constraints:
+      - "mcp<2"
   - name: supabase
     type: node
     package: "@supabase/mcp-server-supabase"
