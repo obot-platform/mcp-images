@@ -84,9 +84,9 @@ images:
     package: pagerduty-mcp
     version: 1.1.0
   - name: playwright
-    type: node
-    package: "@playwright/mcp"
-    version: 0.0.79
+    type: docker
+    package: "mcr.microsoft.com/playwright/mcp"
+    version: v0.0.79
   - name: postgresql
     type: python
     package: postgres-mcp
@@ -120,4 +120,4 @@ images:
   - name: terraform
     type: docker
     package: hashicorp/terraform-mcp-server
-    version: 0.5.1
+    version: 1.2.0
