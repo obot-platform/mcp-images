@@ -2,17 +2,15 @@ FROM ghcr.io/obot-platform/mmmcp:v0.1.1
 
 USER root
 
-RUN apk add make git nodejs npm pnpm python3
-
-RUN npm install -g npm
-
-RUN mkdir -p /home/mmmcp && \
-    chown -R mmmcp:mmmcp "/home/mmmcp"
-
-# Setup chrome for things like Playwright
-RUN mkdir -p /opt/google/chrome && \
-    apk add chromium && \
-    ln -sf /usr/bin/chromium-browser /opt/google/chrome/chrome
+# Toolchain, Node, Python, and Chromium (for Playwright/Puppeteer) in one layer.
+# The chrome symlink is how Playwright's `chrome` channel finds the wolfi
+# chromium build.
+RUN apk add --no-cache make git nodejs npm pnpm python3 chromium && \
+    npm install -g npm && \
+    mkdir -p /opt/google/chrome && \
+    ln -sf /usr/bin/chromium-browser /opt/google/chrome/chrome && \
+    mkdir -p /home/mmmcp && \
+    chown -R mmmcp:mmmcp /home/mmmcp
 
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
