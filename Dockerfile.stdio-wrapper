@@ -2,19 +2,11 @@ FROM ghcr.io/obot-platform/mmmcp:v0.1.1
 
 USER root
 
-RUN apk add make git nodejs npm pnpm python3
-
-RUN npm install -g npm
-
-RUN mkdir -p /home/mmmcp && \
-    chown -R mmmcp:mmmcp "/home/mmmcp"
-
-# Setup chrome for things like Playwright
-RUN mkdir -p /opt/google/chrome && \
-    apk add chromium && \
-    ln -sf /usr/bin/chromium-browser /opt/google/chrome/chrome
-
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+# Toolchain, Node, and Python in one layer.
+RUN apk add --no-cache make git nodejs npm pnpm python3 && \
+    npm install -g npm && \
+    mkdir -p /home/mmmcp && \
+    chown -R mmmcp:mmmcp /home/mmmcp
 
 # Enable bytecode compilation
 ENV UV_COMPILE_BYTECODE=1
