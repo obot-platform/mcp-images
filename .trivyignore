@@ -1,2 +1,16 @@
-# False positive - MiniZip not built in Debian Bookworm's zlib1g, see reference https://nvd.nist.gov/vuln/detail/CVE-2023-45853 and https://security-tracker.debian.org/tracker/CVE-2023-45853
+# zlib1g / MiniZip: Debian does not build MiniZip into zlib1g, so the vulnerable
+# code is not present. Still relevant -- Debian-based images remain in the tree
+# (mcp-servers/Dockerfile.snowflake is python3.12-trixie-slim, and several
+# repackaging/images.yaml entries pull external Debian-based images).
+# Refs: https://nvd.nist.gov/vuln/detail/CVE-2023-45853
+#       https://security-tracker.debian.org/tracker/CVE-2023-45853
 CVE-2023-45853
+
+# setuptools 70.3.0 -- FALSE POSITIVE in base-python / stdio-wrapper.
+# Trivy infers setuptools from pip's vendored manifest
+# (site-packages/pip/_vendor/vendor.txt and bom.cdx.json), but pip only vendors
+# pkg_resources. Verified in the built image: there is no pip/_vendor/setuptools
+# directory and no package_index module, so the vulnerable code paths are absent.
+# Re-check if pip ever starts vendoring setuptools proper.
+CVE-2025-47273
+CVE-2026-59890
