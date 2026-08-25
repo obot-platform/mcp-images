@@ -35,6 +35,8 @@ images:
     type: python
     package: chroma-mcp
     version: 0.2.6
+    overrides:
+      - "mcp==1.29.1"
   - name: context7
     type: node
     package: "@upstash/context7-mcp"
@@ -107,6 +109,8 @@ images:
     version: 0.0.1a4
     constraints:
       - "mammoth~=1.11.0"
+    overrides:
+      - "mcp==1.29.1"
   - name: brave-search
     type: node
     package: "@brave/brave-search-mcp-server"

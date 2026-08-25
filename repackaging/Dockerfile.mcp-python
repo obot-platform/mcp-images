@@ -4,19 +4,23 @@ FROM ghcr.io/obot-platform/mcp-images/base-python:${BASE_TAG}
 ARG MCP_PACKAGE
 ARG MCP_VERSION
 ARG MCP_CONSTRAINTS=""
+ARG MCP_OVERRIDES=""
 
 USER 1000
 
-# Install the MCP package using uv with optional dependency constraints
-RUN if [ -n "$MCP_CONSTRAINTS" ]; then \
-        # Convert newline-separated constraints to space-separated --with flags
-        CONSTRAINTS_ARGS=""; \
-        for constraint in $MCP_CONSTRAINTS; do \
-            if [ -n "$constraint" ]; then \
-                CONSTRAINTS_ARGS="$CONSTRAINTS_ARGS --with '$constraint'"; \
-            fi; \
+# Install the MCP package using uv with optional extra requirements and
+# dependency overrides. Overrides let us patch vulnerable transitive pins while
+# keeping the upstream package version stable.
+RUN set -- uv tool install "${MCP_PACKAGE}@${MCP_VERSION}"; \
+    for constraint in $MCP_CONSTRAINTS; do \
+        set -- "$@" --with "$constraint"; \
+    done; \
+    if [ -n "$MCP_OVERRIDES" ]; then \
+        overrides_file="$(mktemp)"; \
+        for override in $MCP_OVERRIDES; do \
+            printf '%s\n' "$override" >> "$overrides_file"; \
         done; \
-        eval "uv tool install '${MCP_PACKAGE}@${MCP_VERSION}' $CONSTRAINTS_ARGS"; \
-    else \
-        uv tool install "${MCP_PACKAGE}@${MCP_VERSION}"; \
-    fi
+        set -- "$@" --overrides "$overrides_file"; \
+    fi; \
+    "$@"; \
+    if [ -n "${overrides_file:-}" ]; then rm -f "$overrides_file"; fi

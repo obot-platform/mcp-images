@@ -1,15 +1,18 @@
+FROM ghcr.io/astral-sh/uv:0.12.5 AS uv-bin
+
 FROM cgr.dev/chainguard/wolfi-base:latest
 
 USER root
 
-RUN apk add make git python3
+RUN apk add --no-cache make git python3
+
+# Copy a pinned uv binary without installing pip and its vendored dependencies.
+COPY --from=uv-bin /uv /uvx /usr/local/bin/
 
 # Enable bytecode compilation
 ENV UV_COMPILE_BYTECODE=1
 # Copy from the cache instead of linking since it's a mounted volume
 ENV UV_LINK_MODE=copy
-
-RUN python -m ensurepip && pip3 install uv
 
 RUN mkdir -p /home/user/.local/bin && \
 chown -R 1000:0 /home/user && \

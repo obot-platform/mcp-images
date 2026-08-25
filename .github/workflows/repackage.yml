@@ -2,13 +2,32 @@ name: Repackage MCP Images
 
 on:
   workflow_call:
+    inputs:
+      force-rebuild:
+        description: Rebuild images even when their versioned tag already exists
+        required: false
+        type: boolean
+        default: false
   workflow_dispatch:
+    inputs:
+      force-rebuild:
+        description: Rebuild images even when their versioned tag already exists
+        required: false
+        type: boolean
+        default: false
   push:
     branches:
       - main
     tags:
       - "v*"
     paths:
+      - .github/workflows/repackage.yml
+      - .trivyignore
+      - trivy-secret.yaml
+      - Dockerfile.base-python
+      - Dockerfile.base-node
+      - Dockerfile.mmmcp
+      - scripts/mmmcp.sh
       - repackaging/**
 
 jobs:
@@ -24,8 +43,8 @@ jobs:
       - name: Generate matrix from images.yaml
         id: set-matrix
         run: |
-          matrix=$(yq eval -o=json '.images[] |select(.type != null) |= pick(["name", "type", "package","version","constraints"])' repackaging/images.yaml |jq -cs .)
-          echo "matrix=$matrix" >> $GITHUB_OUTPUT
+          matrix=$(yq eval -o=json '.images[] | select(.type != null) |= pick(["name", "type", "package", "version", "constraints", "overrides"])' repackaging/images.yaml | jq -cs .)
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
   repackage:
     permissions:
@@ -59,17 +78,17 @@ jobs:
       - name: Check if image already exists
         id: check-image
         run: |
-          if [ "${{ vars. FORCE_REBUILD }}" = "true" ]; then
+          if [ "${{ inputs.force-rebuild }}" = "true" ] || [ "${{ vars.FORCE_REBUILD }}" = "true" ]; then
             echo "Forcing rebuild of image"
-            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "exists=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           IMAGE_TAG="ghcr.io/${{ github.repository }}/${{ matrix.name }}:${{ matrix.version }}"
           if docker manifest inspect "$IMAGE_TAG" >/dev/null 2>&1; then
-            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "Image $IMAGE_TAG already exists, skipping build"
           else
-            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "exists=false" >> "$GITHUB_OUTPUT"
             echo "Image $IMAGE_TAG does not exist, will build"
           fi
 
@@ -88,6 +107,7 @@ jobs:
             MCP_VERSION=${{ matrix.version }}
             BASE_TAG=main
             MCP_CONSTRAINTS=${{ join(matrix.constraints, ' ') }}
+            MCP_OVERRIDES=${{ join(matrix.overrides, ' ') }}
           tags: |
             ghcr.io/${{ github.repository }}/${{ matrix.name }}-base:${{ matrix.version }}
 
@@ -141,16 +161,8 @@ jobs:
         if: ${{ matrix.type == 'node' && steps.check-image.outputs.exists == 'false' }}
         env:
           DIGEST: ${{ steps.build-final.outputs.digest }}
-          TAGS: |
-            ghcr.io/${{ github.repository }}/${{ matrix.name }}:${{ matrix.version }}
-        run: |
-          images=""
-          for tag in ${TAGS}; do
-            if [ -n "$tag" ]; then
-              images+="${tag}@${DIGEST} "
-            fi
-          done
-          cosign sign --yes ${images}
+          IMAGE: ghcr.io/${{ github.repository }}/${{ matrix.name }}:${{ matrix.version }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
 
       - name: Generate SBOM
         if: steps.check-image.outputs.exists == 'true'
@@ -189,18 +201,19 @@ jobs:
         include: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Run Trivy
-        if: steps.check-image.outputs.exists == 'true' || steps.build-final.outputs.digest != ''
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ghcr.io/${{ github.repository }}/${{ matrix.name }}:${{ matrix.version }}
-          skip-dirs: "**/venv,**/.local/share/uv/tools"
+          skip-dirs: "**/venv"
           format: "sarif"
           output: "trivy-results-${{ matrix.name }}-${{ matrix.version }}.sarif"
 
       - name: Upload SARIF file
-        if: steps.check-image.outputs.exists == 'true' || steps.build-final.outputs.digest != ''
         uses: github/codeql-action/upload-sarif@v3
         with:
-          category: trivy-${{ matrix.name }}-${{ matrix.version }}
+          category: trivy-${{ matrix.name }}
           sarif_file: trivy-results-${{ matrix.name }}-${{ matrix.version }}.sarif
