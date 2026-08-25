@@ -1,12 +1,23 @@
+FROM ghcr.io/astral-sh/uv:0.12.5 AS uv-bin
+
 FROM ghcr.io/obot-platform/mmmcp:v0.1.1
 
 USER root
 
 # Toolchain, Node, and Python in one layer.
 RUN apk add --no-cache make git nodejs npm pnpm python3 && \
-    npm install -g npm && \
+    npm install -g npm@12.0.2 && \
+    npm_root="$(npm root -g)" && \
+    npm pkg delete devDependencies --prefix "${npm_root}/npm" && \
+    npm install --prefix "${npm_root}/npm" --no-save --omit=dev \
+        --ignore-scripts --no-audit --no-fund \
+        brace-expansion@5.0.9 ip-address@10.3.1 tar@7.5.21 undici@6.28.0 && \
+    npm cache clean --force && \
     mkdir -p /home/mmmcp && \
     chown -R mmmcp:mmmcp /home/mmmcp
+
+# Copy a pinned uv binary without installing pip and its vendored dependencies.
+COPY --from=uv-bin /uv /uvx /usr/local/bin/
 
 # Enable bytecode compilation
 ENV UV_COMPILE_BYTECODE=1
@@ -16,8 +27,6 @@ ENV UV_LINK_MODE=copy
 USER mmmcp
 
 ENV PATH="/home/mmmcp/.local/bin:$PATH"
-
-RUN python -m ensurepip && pip3 install uv
 
 ENTRYPOINT ["mmmcp"]
 

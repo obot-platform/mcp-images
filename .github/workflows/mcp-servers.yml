@@ -9,6 +9,9 @@ on:
     tags:
       - "v*"
     paths:
+      - .github/workflows/mcp-servers.yml
+      - .trivyignore
+      - trivy-secret.yaml
       - mcp-servers/**
       - http-webhook-mcp-converter/**
       - hubspot/**
@@ -64,14 +67,8 @@ jobs:
       - name: Sign Images
         env:
           DIGEST: ${{ steps.build-and-push.outputs.digest }}
-          TAGS: |
-            ghcr.io/${{ github.repository }}/${{ matrix.image-identifier }}:${{ github.ref_name }}
-        run: |
-          images=""
-          for tag in ${TAGS}; do
-            images+="${tag}@${DIGEST} "
-          done
-          cosign sign --yes ${images}
+          IMAGE: ghcr.io/${{ github.repository }}/${{ matrix.image-identifier }}:${{ github.ref_name }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
       - name: Setup crane
         uses: imjasonh/setup-crane@v0.4
       - name: Copy image to latest tag
@@ -98,6 +95,9 @@ jobs:
           - http-webhook-mcp-converter
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Run Trivy
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
