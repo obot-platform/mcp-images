@@ -13,6 +13,8 @@ on:
 
 jobs:
   generate-matrix:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
