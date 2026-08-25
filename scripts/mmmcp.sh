@@ -9,7 +9,7 @@ shift
 # does not interpret literal ${NAME} sequences supplied to the child process.
 jq -n \
     --arg command "$command" \
-    --arg meta_env "${MMMCP_META_ENV:-}" \
+    --arg meta_env "${MMMCP_META_ENV:-${NANOBOT_META_ENV:-}}" \
     --args '
         def escape_dollars: gsub("\\$"; "$$");
 
