@@ -44,9 +44,16 @@ jobs:
         id: image
         env:
           IMAGE_JSON: ${{ toJson(matrix) }}
+          REF_TYPE: ${{ github.ref_type }}
           REGISTRY_PREFIX: ghcr.io/${{ github.repository }}
           VERSION: ${{ github.ref_name }}
         run: |
+          # Tag releases are meaningful only for images with an explicit
+          # application version; never derive an unversioned lineage from a tag.
+          if [ "$REF_TYPE" = "tag" ] && ! jq -e '.version | type == "string" and length > 0' <<<"$IMAGE_JSON" >/dev/null; then
+            echo "Refusing to publish an unversioned image from a tag ref" >&2
+            exit 1
+          fi
           # Each image declares its own repository paths and remote parents, so
           # unrelated source changes reuse their existing immutable revisions.
           plan=$(python3 scripts/repository_image.py \

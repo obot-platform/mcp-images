@@ -28,8 +28,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: Read MCP server images
         id: images
+        env:
+          REF_TYPE: ${{ github.ref_type }}
         run: |
           images=$(yq eval -o=json '[.images[] | select(.group == "mcp-server") | del(.group)]' repository-images.yaml | jq -c .)
+          # Repository release tags apply only to images with an application
+          # version. Unversioned images remain in branch-based lineages.
+          if [ "$REF_TYPE" = "tag" ]; then
+            images=$(jq -c '[.[] | select(.version != null)]' <<<"$images")
+          fi
           echo "value=$images" >> "$GITHUB_OUTPUT"
 
   publish:

@@ -3,9 +3,6 @@ name: Build and Push STDIO Wrapper Image
 on:
   workflow_call:
   workflow_dispatch:
-  push:
-    tags:
-      - "v*"
 
 concurrency:
   group: publish-stdio-wrapper-image
