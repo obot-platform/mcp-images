@@ -264,3 +264,22 @@ jobs:
         with:
           category: trivy-${{ matrix.name }}-${{ steps.image.outputs.tag }}
           sarif_file: trivy-results-${{ matrix.name }}-${{ steps.image.outputs.tag }}.sarif
+
+      - name: Trigger catalog update
+        # Normal runs notify only for a new revision. A rerun also notifies for
+        # a reused image in case the first attempt published it but failed before
+        # dispatching the catalog PR.
+        if: steps.image.outputs.build == 'true' || github.run_attempt > 1
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.DISPATCH_PAT }}
+          repository: obot-platform/mcp-catalog
+          event-type: update-image-tag
+          client-payload: |
+            {
+              "image_name": "${{ steps.image.outputs.repository }}",
+              "new_tag": "${{ steps.image.outputs.tag }}",
+              "name": "${{ matrix.name }}",
+              "package": "${{ matrix.package }}",
+              "type": "${{ matrix.type }}"
+            }
