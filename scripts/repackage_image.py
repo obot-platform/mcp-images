@@ -253,66 +253,21 @@ def plan_image(
     return result
 
 
-def parse_dependencies(values: Iterable[str]) -> dict[str, str]:
-    dependencies: dict[str, str] = {}
-    for value in values:
-        name, separator, digest = value.partition("=")
-        if not separator or not name or not digest:
-            raise RepackageError(
-                f"invalid dependency {value!r}; expected NAME=IMMUTABLE_REFERENCE"
-            )
-        dependencies[name] = digest
-    return dependencies
-
-
 def create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    fingerprint_parser = subparsers.add_parser("fingerprint")
-    fingerprint_parser.add_argument("--root", type=Path, default=Path("."))
-    fingerprint_parser.add_argument("--image-json", required=True)
-    fingerprint_parser.add_argument(
-        "--dependency", action="append", default=[], metavar="NAME=REFERENCE"
-    )
-    fingerprint_parser.add_argument("--explain", action="store_true")
-
-    resolve_parser = subparsers.add_parser("resolve")
-    resolve_parser.add_argument("--repository", required=True)
-    resolve_parser.add_argument("--version", required=True)
-    resolve_parser.add_argument("--fingerprint", required=True)
-    resolve_parser.add_argument("--platform", default="linux/amd64")
-
-    plan_parser = subparsers.add_parser("plan")
-    plan_parser.add_argument("--root", type=Path, default=Path("."))
-    plan_parser.add_argument("--image-json", required=True)
-    plan_parser.add_argument("--registry-prefix", required=True)
-    plan_parser.add_argument("--platform", default="linux/amd64")
+    parser.add_argument("--image-json", required=True)
+    parser.add_argument("--registry-prefix", required=True)
     return parser
 
 
 def main() -> int:
     args = create_parser().parse_args()
     try:
-        if args.command == "fingerprint":
-            image = json.loads(args.image_json)
-            fingerprint, payload = compute_fingerprint(
-                args.root, image, parse_dependencies(args.dependency)
-            )
-            result: dict[str, Any] = {"fingerprint": fingerprint}
-            if args.explain:
-                result["inputs"] = payload
-        elif args.command == "resolve":
-            result = resolve_revision(
-                args.repository, args.version, args.fingerprint, args.platform
-            )
-        else:
-            result = plan_image(
-                args.root,
-                json.loads(args.image_json),
-                args.registry_prefix.rstrip("/"),
-                args.platform,
-            )
+        result = plan_image(
+            Path("."),
+            json.loads(args.image_json),
+            args.registry_prefix.rstrip("/"),
+        )
         print(json.dumps(result, sort_keys=True))
         return 0
     except (OSError, ValueError, json.JSONDecodeError, RepackageError) as exc:

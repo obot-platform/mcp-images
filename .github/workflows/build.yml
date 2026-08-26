@@ -57,7 +57,7 @@ jobs:
           echo "| Image | Proposed tag | Action | Reason |" >> "$GITHUB_STEP_SUMMARY"
           echo "| --- | --- | --- | --- |" >> "$GITHUB_STEP_SUMMARY"
           while IFS= read -r image; do
-            plan=$(python3 scripts/repackage_image.py plan \
+            plan=$(python3 scripts/repackage_image.py \
               --image-json "$image" \
               --registry-prefix "$REGISTRY_PREFIX")
             name=$(jq -r '.name' <<<"$image")

@@ -69,7 +69,7 @@ jobs:
         run: |
           # The plan resolves parent digests first, hashes all effective inputs,
           # then either reuses the latest matching revision or allocates N+1.
-          plan=$(python3 scripts/repackage_image.py plan \
+          plan=$(python3 scripts/repackage_image.py \
             --image-json "$IMAGE_JSON" \
             --registry-prefix "$REGISTRY_PREFIX")
           echo "build=$(jq -r '.build' <<<"$plan")" >> "$GITHUB_OUTPUT"

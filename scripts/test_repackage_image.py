@@ -197,5 +197,27 @@ class PlanTests(unittest.TestCase):
             )
 
 
+class CommandTests(unittest.TestCase):
+    @mock.patch("repackage_image.plan_image")
+    @mock.patch("builtins.print")
+    def test_cli_exposes_only_the_complete_plan_operation(self, output, plan):
+        plan.return_value = {"tag": "1.0.0-obot1"}
+        arguments = [
+            "repackage_image.py",
+            "--image-json",
+            '{"name":"example"}',
+            "--registry-prefix",
+            "ghcr.io/example/images/",
+        ]
+
+        with mock.patch("sys.argv", arguments):
+            self.assertEqual(repackage_image.main(), 0)
+
+        plan.assert_called_once_with(
+            Path("."), {"name": "example"}, "ghcr.io/example/images"
+        )
+        output.assert_called_once_with('{"tag": "1.0.0-obot1"}')
+
+
 if __name__ == "__main__":
     unittest.main()
