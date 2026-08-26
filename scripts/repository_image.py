@@ -52,6 +52,8 @@ def canonical_image(image: dict[str, Any]) -> dict[str, Any]:
         "name": _nonempty_string(image.get("name"), "name"),
         "dockerfile": _relative_path(image.get("dockerfile"), "dockerfile"),
     }
+    if "version" in image:
+        result["version"] = _nonempty_string(image.get("version"), "version")
 
     paths = image.get("paths", [])
     if not isinstance(paths, list):
@@ -179,6 +181,7 @@ def plan_image(
 ) -> dict[str, Any]:
     """Pin remote inputs, fingerprint declared sources, and allocate a revision."""
     normalized = canonical_image(image)
+    version = normalized.get("version", version)
     dependencies: dict[str, str] = {}
     build_args: dict[str, str] = {}
 
@@ -198,6 +201,7 @@ def plan_image(
     result.update(
         {
             "repository": repository,
+            "version": version,
             "fingerprint": fingerprint,
             "fingerprint_inputs": inputs,
             "build_args": build_args,

@@ -1,4 +1,4 @@
-ARG GITHUB_IMAGE=ghcr.io/github/github-mcp-server:latest
+ARG GITHUB_IMAGE=ghcr.io/github/github-mcp-server:v1.11.0
 ARG MMMCP_IMAGE=ghcr.io/obot-platform/mmmcp:v0.1.1
 
 FROM ${GITHUB_IMAGE} AS binary

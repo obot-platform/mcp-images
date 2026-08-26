@@ -58,6 +58,7 @@ jobs:
           echo "tag=$(jq -r '.tag' <<<"$plan")" >> "$GITHUB_OUTPUT"
           echo "repository=$(jq -r '.repository' <<<"$plan")" >> "$GITHUB_OUTPUT"
           echo "fingerprint=$(jq -r '.fingerprint' <<<"$plan")" >> "$GITHUB_OUTPUT"
+          echo "version=$(jq -r '.version' <<<"$plan")" >> "$GITHUB_OUTPUT"
           {
             echo "build-args<<EOF"
             jq -r '.build_args | to_entries[] | "\(.key)=\(.value)"' <<<"$plan"
@@ -98,13 +99,19 @@ jobs:
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             io.obot.mcp.input-fingerprint=${{ steps.image.outputs.fingerprint }}
-            io.obot.mcp.application.version=${{ github.ref_name }}
+            io.obot.mcp.application.version=${{ steps.image.outputs.version }}
             io.obot.mcp.image.revision=${{ steps.image.outputs.revision }}
 
       - name: Update branch alias
         if: github.ref_type == 'branch'
+        env:
+          VERSION: ${{ steps.image.outputs.version }}
         run: |
-          crane tag "${{ steps.image.outputs.repository }}:${{ steps.image.outputs.tag }}" "${{ github.ref_name }}"
+          alias="$VERSION"
+          if [ "$VERSION" != "${{ github.ref_name }}" ]; then
+            alias="${VERSION}-${{ github.ref_name }}"
+          fi
+          crane tag "${{ steps.image.outputs.repository }}:${{ steps.image.outputs.tag }}" "$alias"
 
       - name: Update latest release alias
         if: github.ref_type == 'tag' && !contains(github.ref_name, '-rc')
@@ -150,9 +157,9 @@ jobs:
           sarif_file: trivy-results-${{ matrix.name }}-${{ steps.image.outputs.tag }}.sarif
 
       - name: Trigger catalog update
-        # Catalog consumers move from latest to the immutable release revision.
-        # Reruns recover a dispatch missed after an otherwise successful publish.
-        if: matrix.catalog == true && github.ref_type == 'tag' && !contains(github.ref_name, '-rc') && (steps.image.outputs.build == 'true' || github.run_attempt > 1)
+        # Versioned catalog images publish like repackages: a new application
+        # revision immediately moves the catalog to its immutable tag.
+        if: matrix.catalog == true && (steps.image.outputs.build == 'true' || github.run_attempt > 1)
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.DISPATCH_PAT }}

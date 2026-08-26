@@ -63,6 +63,15 @@ class RepositoryFingerprintTests(unittest.TestCase):
         )
         self.assertNotEqual(first, second)
 
+    def test_version_change_updates_fingerprint(self):
+        first, _ = repository_image.compute_fingerprint(
+            self.root, self.image, "1.0.0", {}
+        )
+        second, _ = repository_image.compute_fingerprint(
+            self.root, self.image, "1.1.0", {}
+        )
+        self.assertNotEqual(first, second)
+
     def test_path_traversal_is_rejected(self):
         self.image["paths"] = ["../secret"]
         with self.assertRaisesRegex(repository_image.RepositoryImageError, "repository"):
@@ -85,6 +94,7 @@ class RepositoryPlanTests(unittest.TestCase):
         }
         image = {
             "name": "example",
+            "version": "1.2.3",
             "dockerfile": "mcp-servers/Dockerfile.example",
             "paths": ["example"],
             "parents": [{"arg": "BASE_IMAGE", "image": "example/base:main"}],
@@ -122,8 +132,9 @@ class RepositoryPlanTests(unittest.TestCase):
                 "SOURCE_COMMIT": "a" * 40,
             },
         )
+        self.assertEqual(result["version"], "1.2.3")
         revision.assert_called_once_with(
-            "ghcr.io/example/images/example", "main", result["fingerprint"]
+            "ghcr.io/example/images/example", "1.2.3", result["fingerprint"]
         )
 
 
