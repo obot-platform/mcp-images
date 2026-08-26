@@ -15,6 +15,9 @@ on:
     branches:
       - main
     paths:
+      - .github/workflows/base-images.yml
+      - .github/workflows/publish-repackages.yml
+      - .github/workflows/repackage.yml
       - .trivyignore
       - trivy-secret.yaml
       - Dockerfile.base-node

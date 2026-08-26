@@ -254,7 +254,6 @@ jobs:
           upload-artifact-retention: 30
 
       - name: Run Trivy
-        if: steps.image.outputs.build == 'true'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ steps.image.outputs.repository }}:${{ steps.image.outputs.tag }}
@@ -263,7 +262,6 @@ jobs:
           output: trivy-results-${{ matrix.name }}-${{ steps.image.outputs.tag }}.sarif
 
       - name: Upload SARIF file
-        if: steps.image.outputs.build == 'true'
         uses: github/codeql-action/upload-sarif@v3
         with:
           category: trivy-${{ matrix.name }}-${{ steps.image.outputs.tag }}
