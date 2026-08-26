@@ -227,25 +227,23 @@ jobs:
             io.obot.mcp.image.revision=${{ steps.image.outputs.revision }}
 
       - name: Read published digest
-        if: steps.image.outputs.build == 'true'
         id: published
         run: |
+          # Post-publication work also runs for reused images so a retry can
+          # finish signing or SBOM generation after a partial previous run.
           digest=$(crane digest "${{ steps.image.outputs.repository }}:${{ steps.image.outputs.tag }}")
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
       - name: Install Cosign
-        if: steps.image.outputs.build == 'true'
         uses: sigstore/cosign-installer@v4.1.1
         with:
           cosign-release: "v3.0.5"
 
       - name: Sign image
-        if: steps.image.outputs.build == 'true'
         run: |
           cosign sign --yes "${{ steps.image.outputs.repository }}@${{ steps.published.outputs.digest }}"
 
       - name: Generate SBOM
-        if: steps.image.outputs.build == 'true'
         uses: anchore/sbom-action@v0.24.0
         with:
           image: ${{ steps.image.outputs.repository }}:${{ steps.image.outputs.tag }}
