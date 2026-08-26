@@ -14,6 +14,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Test repackage image resolver
+        run: python3 -m unittest discover -s scripts -p 'test_*.py' -v
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -22,3 +25,40 @@ jobs:
           for dockerfile in Dockerfile.* mcp-servers/Dockerfile.* repackaging/Dockerfile.*; do
             docker buildx build --check --file "$dockerfile" .
           done
+  repackage-plan:
+    name: Preview immutable image revisions
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup crane
+        uses: imjasonh/setup-crane@v0.4
+
+      - name: Preview revisions
+        env:
+          REGISTRY_PREFIX: ghcr.io/${{ github.repository }}
+        run: |
+          images=$(yq eval -o=json '[.images[] | select(.type != null) | pick(["name", "type", "package", "version", "constraints", "overrides"])]' repackaging/images.yaml | jq -c .)
+          duplicates=$(jq -r 'group_by(.name)[] | select(length > 1) | .[0].name' <<<"$images")
+          if [ -n "$duplicates" ]; then
+            echo "Duplicate image names:" >&2
+            echo "$duplicates" >&2
+            exit 1
+          fi
+
+          echo "## Repackaged image revisions" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Image | Proposed tag | Action | Reason |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- | --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          while IFS= read -r image; do
+            plan=$(python3 scripts/repackage_image.py plan \
+              --image-json "$image" \
+              --registry-prefix "$REGISTRY_PREFIX")
+            name=$(jq -r '.name' <<<"$image")
+            tag=$(jq -r '.tag' <<<"$plan")
+            build=$(jq -r 'if .build then "build" else "reuse" end' <<<"$plan")
+            reason=$(jq -r '.reason' <<<"$plan")
+            echo "| $name | \`$tag\` | $build | $reason |" >> "$GITHUB_STEP_SUMMARY"
+          done < <(jq -c '.[]' <<<"$images")

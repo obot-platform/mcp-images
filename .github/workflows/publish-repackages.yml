@@ -1,0 +1,75 @@
+name: Publish Repackaged MCP Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      rebuild_base_images:
+        description: Rebuild both shared base images before repackaging
+        required: false
+        type: boolean
+        default: false
+  push:
+    branches:
+      - main
+    paths:
+      - .trivyignore
+      - trivy-secret.yaml
+      - Dockerfile.base-node
+      - Dockerfile.base-python
+      - Dockerfile.mmmcp
+      - scripts/mmmcp.sh
+      - scripts/repackage_image.py
+      - repackaging/**
+
+concurrency:
+  group: publish-repackaged-mcp-images
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+  id-token: write
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      base_images: ${{ steps.detect.outputs.base_images }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Detect shared base changes
+        id: detect
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          REBUILD_BASE_IMAGES: ${{ inputs.rebuild_base_images }}
+        run: |
+          images='[]'
+          if [ "$REBUILD_BASE_IMAGES" = "true" ]; then
+            images='["base-node","base-python"]'
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            changed=$(git diff --name-only "$BEFORE_SHA" "${{ github.sha }}")
+            if grep -qx 'Dockerfile.base-node' <<<"$changed"; then
+              images=$(jq -c '. + ["base-node"]' <<<"$images")
+            fi
+            if grep -qx 'Dockerfile.base-python' <<<"$changed"; then
+              images=$(jq -c '. + ["base-python"]' <<<"$images")
+            fi
+          fi
+          echo "base_images=$images" >> "$GITHUB_OUTPUT"
+
+  base-images:
+    needs: changes
+    if: needs.changes.outputs.base_images != '[]'
+    uses: ./.github/workflows/base-images.yml
+    with:
+      image_identifiers: ${{ needs.changes.outputs.base_images }}
+    secrets: inherit
+
+  repackage:
+    needs: [changes, base-images]
+    if: always() && needs.changes.result == 'success' && (needs.base-images.result == 'success' || needs.base-images.result == 'skipped')
+    uses: ./.github/workflows/repackage.yml
+    secrets: inherit

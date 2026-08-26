@@ -1,9 +1,11 @@
 ARG BASE_IMAGE=cgr.dev/chainguard/wolfi-base:latest
+ARG MMMCP_IMAGE=ghcr.io/obot-platform/mmmcp:v0.1.1
+FROM ${MMMCP_IMAGE} AS mmmcp
 FROM ${BASE_IMAGE}
 
 USER root
 
-COPY --from=ghcr.io/obot-platform/mmmcp:v0.1.1 /usr/local/bin/mmmcp /usr/local/bin/
+COPY --from=mmmcp /usr/local/bin/mmmcp /usr/local/bin/
 
 COPY ./scripts/mmmcp.sh /usr/local/bin/mmmcp.sh
 

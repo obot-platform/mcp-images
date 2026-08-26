@@ -2,33 +2,6 @@ name: Repackage MCP Images
 
 on:
   workflow_call:
-    inputs:
-      force-rebuild:
-        description: Rebuild images even when their versioned tag already exists
-        required: false
-        type: boolean
-        default: false
-  workflow_dispatch:
-    inputs:
-      force-rebuild:
-        description: Rebuild images even when their versioned tag already exists
-        required: false
-        type: boolean
-        default: false
-  push:
-    branches:
-      - main
-    tags:
-      - "v*"
-    paths:
-      - .github/workflows/repackage.yml
-      - .trivyignore
-      - trivy-secret.yaml
-      - Dockerfile.base-python
-      - Dockerfile.base-node
-      - Dockerfile.mmmcp
-      - scripts/mmmcp.sh
-      - repackaging/**
 
 jobs:
   generate-matrix:
@@ -43,14 +16,20 @@ jobs:
       - name: Generate matrix from images.yaml
         id: set-matrix
         run: |
-          matrix=$(yq eval -o=json '.images[] | select(.type != null) |= pick(["name", "type", "package", "version", "constraints", "overrides"])' repackaging/images.yaml | jq -cs .)
+          matrix=$(yq eval -o=json '[.images[] | select(.type != null) | pick(["name", "type", "package", "version", "constraints", "overrides"])]' repackaging/images.yaml | jq -c .)
+          duplicates=$(jq -r 'group_by(.name)[] | select(length > 1) | .[0].name' <<<"$matrix")
+          if [ -n "$duplicates" ]; then
+            echo "Duplicate image names:" >&2
+            echo "$duplicates" >&2
+            exit 1
+          fi
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
   repackage:
     permissions:
       contents: read
       packages: write
-      actions: read
+      security-events: write
       id-token: write
     needs: generate-matrix
     strategy:
@@ -68,6 +47,9 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Setup crane
+        uses: imjasonh/setup-crane@v0.4
+
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -75,25 +57,65 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Check if image already exists
-        id: check-image
+      - name: Resolve immutable image revision
+        id: image
+        env:
+          IMAGE_JSON: ${{ toJson(matrix) }}
+          REGISTRY_PREFIX: ghcr.io/${{ github.repository }}
         run: |
-          if [ "${{ inputs.force-rebuild }}" = "true" ] || [ "${{ vars.FORCE_REBUILD }}" = "true" ]; then
-            echo "Forcing rebuild of image"
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          IMAGE_TAG="ghcr.io/${{ github.repository }}/${{ matrix.name }}:${{ matrix.version }}"
-          if docker manifest inspect "$IMAGE_TAG" >/dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "Image $IMAGE_TAG already exists, skipping build"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "Image $IMAGE_TAG does not exist, will build"
+          plan=$(python3 scripts/repackage_image.py plan \
+            --image-json "$IMAGE_JSON" \
+            --registry-prefix "$REGISTRY_PREFIX")
+          echo "build=$(jq -r '.build' <<<"$plan")" >> "$GITHUB_OUTPUT"
+          echo "revision=$(jq -r '.revision' <<<"$plan")" >> "$GITHUB_OUTPUT"
+          echo "tag=$(jq -r '.tag' <<<"$plan")" >> "$GITHUB_OUTPUT"
+          echo "repository=$(jq -r '.repository' <<<"$plan")" >> "$GITHUB_OUTPUT"
+          echo "fingerprint=$(jq -r '.fingerprint' <<<"$plan")" >> "$GITHUB_OUTPUT"
+          echo "base-image=$(jq -r '.base_image // empty' <<<"$plan")" >> "$GITHUB_OUTPUT"
+          echo "wrapper-image=$(jq -r '.wrapper_image // empty' <<<"$plan")" >> "$GITHUB_OUTPUT"
+          echo "source-image=$(jq -r '.source_image // empty' <<<"$plan")" >> "$GITHUB_OUTPUT"
+          jq . <<<"$plan"
+
+      - name: Refuse immutable tag races
+        if: steps.image.outputs.build == 'true'
+        run: |
+          if crane manifest "${{ steps.image.outputs.repository }}:${{ steps.image.outputs.tag }}" >/dev/null 2>&1; then
+            echo "Immutable tag already exists: ${{ steps.image.outputs.repository }}:${{ steps.image.outputs.tag }}" >&2
+            exit 1
           fi
 
-      - name: Build and push python-based base image
-        if: ${{ matrix.type == 'python' && steps.check-image.outputs.exists == 'false' }}
+      - name: Update moving main alias
+        if: steps.image.outputs.build == 'false'
+        run: |
+          crane tag "${{ steps.image.outputs.repository }}:${{ steps.image.outputs.tag }}" "${{ matrix.version }}-main"
+
+      - name: Check application base image
+        if: (matrix.type == 'node' || matrix.type == 'python') && steps.image.outputs.build == 'true'
+        id: application-base
+        env:
+          REFERENCE: ${{ steps.image.outputs.repository }}-base:${{ steps.image.outputs.tag }}
+          EXPECTED_FINGERPRINT: ${{ steps.image.outputs.fingerprint }}
+          EXPECTED_VERSION: ${{ matrix.version }}
+          EXPECTED_REVISION: ${{ steps.image.outputs.revision }}
+        run: |
+          if crane manifest "$REFERENCE" >/dev/null 2>&1; then
+            config=$(crane config --platform linux/amd64 "$REFERENCE")
+            actual_fingerprint=$(jq -r '.config.Labels["io.obot.mcp.input-fingerprint"] // empty' <<<"$config")
+            actual_version=$(jq -r '.config.Labels["io.obot.mcp.application.version"] // empty' <<<"$config")
+            actual_revision=$(jq -r '.config.Labels["io.obot.mcp.image.revision"] // empty' <<<"$config")
+            if [ "$actual_fingerprint" != "$EXPECTED_FINGERPRINT" ] || \
+               [ "$actual_version" != "$EXPECTED_VERSION" ] || \
+               [ "$actual_revision" != "$EXPECTED_REVISION" ]; then
+              echo "Existing application base has unexpected immutable metadata: $REFERENCE" >&2
+              exit 1
+            fi
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and push Python application base
+        if: matrix.type == 'python' && steps.image.outputs.build == 'true' && steps.application-base.outputs.build == 'true'
         uses: docker/build-push-action@v6
         id: build-python-base
         with:
@@ -105,14 +127,19 @@ jobs:
           build-args: |
             MCP_PACKAGE=${{ matrix.package }}
             MCP_VERSION=${{ matrix.version }}
-            BASE_TAG=main
+            BASE_IMAGE=${{ steps.image.outputs.base-image }}
             MCP_CONSTRAINTS=${{ join(matrix.constraints, ' ') }}
             MCP_OVERRIDES=${{ join(matrix.overrides, ' ') }}
           tags: |
-            ghcr.io/${{ github.repository }}/${{ matrix.name }}-base:${{ matrix.version }}
+            ${{ steps.image.outputs.repository }}-base:${{ steps.image.outputs.tag }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            io.obot.mcp.input-fingerprint=${{ steps.image.outputs.fingerprint }}
+            io.obot.mcp.application.version=${{ matrix.version }}
+            io.obot.mcp.image.revision=${{ steps.image.outputs.revision }}
 
-      - name: Build and push node-based base image
-        if: ${{ matrix.type == 'node' && steps.check-image.outputs.exists == 'false' }}
+      - name: Build and push Node application base
+        if: matrix.type == 'node' && steps.image.outputs.build == 'true' && steps.application-base.outputs.build == 'true'
         uses: docker/build-push-action@v6
         id: build-node-base
         with:
@@ -124,12 +151,24 @@ jobs:
           build-args: |
             MCP_PACKAGE=${{ matrix.package }}
             MCP_VERSION=${{ matrix.version }}
-            BASE_TAG=main
+            BASE_IMAGE=${{ steps.image.outputs.base-image }}
           tags: |
-            ghcr.io/${{ github.repository }}/${{ matrix.name }}-base:${{ matrix.version }}
+            ${{ steps.image.outputs.repository }}-base:${{ steps.image.outputs.tag }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            io.obot.mcp.input-fingerprint=${{ steps.image.outputs.fingerprint }}
+            io.obot.mcp.application.version=${{ matrix.version }}
+            io.obot.mcp.image.revision=${{ steps.image.outputs.revision }}
+
+      - name: Read application base digest
+        if: (matrix.type == 'node' || matrix.type == 'python') && steps.image.outputs.build == 'true'
+        id: base
+        run: |
+          digest=$(crane digest "${{ steps.image.outputs.repository }}-base:${{ steps.image.outputs.tag }}")
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
       - name: Build final image
-        if: ${{ matrix.type == 'node' || matrix.type == 'python' }}
+        if: (matrix.type == 'node' || matrix.type == 'python') && steps.image.outputs.build == 'true'
         uses: docker/build-push-action@v6
         id: build-final
         with:
@@ -139,81 +178,77 @@ jobs:
           file: Dockerfile.mmmcp
           platforms: linux/amd64,linux/arm64
           build-args: |
-            BASE_IMAGE=ghcr.io/${{ github.repository }}/${{ matrix.name }}-base:${{ matrix.version }}
+            BASE_IMAGE=${{ steps.image.outputs.repository }}-base@${{ steps.base.outputs.digest }}
+            MMMCP_IMAGE=${{ steps.image.outputs.wrapper-image }}
           tags: |
-            ghcr.io/${{ github.repository }}/${{ matrix.name }}:${{ matrix.version }}
+            ${{ steps.image.outputs.repository }}:${{ steps.image.outputs.tag }}
+            ${{ steps.image.outputs.repository }}:${{ matrix.version }}-main
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            io.obot.mcp.input-fingerprint=${{ steps.image.outputs.fingerprint }}
+            io.obot.mcp.application.version=${{ matrix.version }}
+            io.obot.mcp.image.revision=${{ steps.image.outputs.revision }}
 
-      - name: Setup crane
-        if: ${{ matrix.type == 'docker' }}
-        uses: imjasonh/setup-crane@v0.4
+      - name: Build tagged upstream Docker image
+        if: matrix.type == 'docker' && steps.image.outputs.build == 'true'
+        uses: docker/build-push-action@v6
+        id: build-docker
+        with:
+          context: .
+          push: true
+          pull: true
+          file: repackaging/Dockerfile.mcp-docker
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            BASE_IMAGE=${{ steps.image.outputs.source-image }}
+          tags: |
+            ${{ steps.image.outputs.repository }}:${{ steps.image.outputs.tag }}
+            ${{ steps.image.outputs.repository }}:${{ matrix.version }}-main
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            io.obot.mcp.input-fingerprint=${{ steps.image.outputs.fingerprint }}
+            io.obot.mcp.application.version=${{ matrix.version }}
+            io.obot.mcp.image.revision=${{ steps.image.outputs.revision }}
 
-      - name: Retag existing docker image
-        if: ${{ matrix.type == 'docker' && steps.check-image.outputs.exists == 'false' }}
+      - name: Read published digest
+        if: steps.image.outputs.build == 'true'
+        id: published
         run: |
-          crane copy ${{ matrix.package }}:${{ matrix.version }} ghcr.io/${{ github.repository }}/${{ matrix.name }}:${{ matrix.version }}
+          digest=$(crane digest "${{ steps.image.outputs.repository }}:${{ steps.image.outputs.tag }}")
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
       - name: Install Cosign
+        if: steps.image.outputs.build == 'true'
         uses: sigstore/cosign-installer@v4.1.1
         with:
           cosign-release: "v3.0.5"
 
       - name: Sign image
-        if: ${{ matrix.type == 'node' && steps.check-image.outputs.exists == 'false' }}
-        env:
-          DIGEST: ${{ steps.build-final.outputs.digest }}
-          IMAGE: ghcr.io/${{ github.repository }}/${{ matrix.name }}:${{ matrix.version }}
-        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+        if: steps.image.outputs.build == 'true'
+        run: |
+          cosign sign --yes "${{ steps.image.outputs.repository }}@${{ steps.published.outputs.digest }}"
 
       - name: Generate SBOM
-        if: steps.check-image.outputs.exists == 'true'
+        if: steps.image.outputs.build == 'true'
         uses: anchore/sbom-action@v0.24.0
         with:
-          image: ghcr.io/${{ github.repository }}/${{ matrix.name }}:${{ matrix.version }}
-          artifact-name: sbom-${{ matrix.name }}-${{ matrix.version }}.spdx.json
+          image: ${{ steps.image.outputs.repository }}:${{ steps.image.outputs.tag }}
+          artifact-name: sbom-${{ matrix.name }}-${{ steps.image.outputs.tag }}.spdx.json
           dependency-snapshot: false
           upload-artifact-retention: 30
 
-      - name: trigger catalog update
-        if: steps.check-image.outputs.exists == 'false'
-        uses: peter-evans/repository-dispatch@v3
-        with:
-          token: ${{ secrets.DISPATCH_PAT }}
-          repository: obot-platform/mcp-catalog
-          event-type: update-image-tag
-          client-payload: |
-            {
-              "image_name": "ghcr.io/${{ github.repository }}/${{ matrix.name }}",
-              "new_tag": "${{ matrix.version }}",
-              "name": "${{ matrix.name }}",
-              "package": "${{ matrix.package }}",
-              "type": "${{ matrix.type }}"
-            }
-
-  trivy-scan:
-    permissions:
-      contents: read
-      packages: read
-      security-events: write
-    needs: [generate-matrix, repackage]
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       - name: Run Trivy
+        if: steps.image.outputs.build == 'true'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: ghcr.io/${{ github.repository }}/${{ matrix.name }}:${{ matrix.version }}
+          image-ref: ${{ steps.image.outputs.repository }}:${{ steps.image.outputs.tag }}
           skip-dirs: "**/venv"
           format: "sarif"
-          output: "trivy-results-${{ matrix.name }}-${{ matrix.version }}.sarif"
+          output: trivy-results-${{ matrix.name }}-${{ steps.image.outputs.tag }}.sarif
 
       - name: Upload SARIF file
+        if: steps.image.outputs.build == 'true'
         uses: github/codeql-action/upload-sarif@v3
         with:
-          category: trivy-${{ matrix.name }}
-          sarif_file: trivy-results-${{ matrix.name }}-${{ matrix.version }}.sarif
+          category: trivy-${{ matrix.name }}-${{ steps.image.outputs.tag }}
+          sarif_file: trivy-results-${{ matrix.name }}-${{ steps.image.outputs.tag }}.sarif
