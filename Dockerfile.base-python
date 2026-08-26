@@ -1,6 +1,7 @@
 ARG BASE_IMAGE=cgr.dev/chainguard/wolfi-base:latest
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.12.5
 
-FROM ghcr.io/astral-sh/uv:0.12.5 AS uv-bin
+FROM ${UV_IMAGE} AS uv-bin
 
 FROM ${BASE_IMAGE}
 

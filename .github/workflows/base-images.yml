@@ -36,13 +36,23 @@ jobs:
         uses: docker/setup-buildx-action@v3
       - name: Setup crane
         uses: imjasonh/setup-crane@v0.4
-      - name: Resolve Wolfi base image
-        id: wolfi
+      - name: Resolve parent images
+        id: parents
+        env:
+          IMAGE_IDENTIFIER: ${{ matrix.image-identifier }}
         run: |
-          # Pin the mutable upstream tag so every downstream fingerprint names
-          # the exact parent manifest used by this build.
-          digest=$(crane digest cgr.dev/chainguard/wolfi-base:latest)
-          echo "image=cgr.dev/chainguard/wolfi-base:latest@${digest}" >> "$GITHUB_OUTPUT"
+          # The exact parent manifests become build arguments so a mutable
+          # upstream tag cannot change between resolution and the build.
+          wolfi_digest=$(crane digest cgr.dev/chainguard/wolfi-base:latest)
+          {
+            echo "build-args<<EOF"
+            echo "BASE_IMAGE=cgr.dev/chainguard/wolfi-base:latest@${wolfi_digest}"
+            if [ "$IMAGE_IDENTIFIER" = "base-python" ]; then
+              uv_digest=$(crane digest ghcr.io/astral-sh/uv:0.12.5)
+              echo "UV_IMAGE=ghcr.io/astral-sh/uv:0.12.5@${uv_digest}"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         id: build-and-push
@@ -52,8 +62,7 @@ jobs:
           pull: true
           file: Dockerfile.${{ matrix.image-identifier }}
           platforms: linux/amd64,linux/arm64
-          build-args: |
-            BASE_IMAGE=${{ steps.wolfi.outputs.image }}
+          build-args: ${{ steps.parents.outputs.build-args }}
           tags: |
             ghcr.io/${{ github.repository }}/${{ matrix.image-identifier }}:${{ github.ref_name }}
       - name: Install Cosign
