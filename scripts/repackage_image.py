@@ -23,9 +23,11 @@ LABEL_FINGERPRINT = "io.obot.mcp.input-fingerprint"
 LABEL_VERSION = "io.obot.mcp.application.version"
 LABEL_REVISION = "io.obot.mcp.image.revision"
 
-# These paths describe the transitive repository inputs for each image family.
-# File contents are hashed, so shared changes fan out only to affected families.
-COMMON_FILES = ("Dockerfile.mmmcp", "scripts/mmmcp.sh")
+# These paths describe the repository inputs that construct each image. The
+# workflow and Docker context configuration affect every build, while the MMMCP
+# wrapper is used only by the Node and Python families.
+BUILD_FILES = (".dockerignore", ".github/workflows/repackage.yml")
+WRAPPER_FILES = ("Dockerfile.mmmcp", "scripts/mmmcp.sh")
 TYPE_FILES = {
     "node": ("Dockerfile.base-node", "repackaging/Dockerfile.mcp-node"),
     "python": ("Dockerfile.base-python", "repackaging/Dockerfile.mcp-python"),
@@ -66,9 +68,9 @@ def canonical_image(image: dict[str, Any]) -> dict[str, Any]:
 
 def fingerprint_files(image_type: str) -> tuple[str, ...]:
     """Return repository inputs that transitively contribute to an image type."""
-    files = TYPE_FILES[image_type]
+    files = BUILD_FILES + TYPE_FILES[image_type]
     if image_type in ("node", "python"):
-        files += COMMON_FILES
+        files += WRAPPER_FILES
     return files
 
 

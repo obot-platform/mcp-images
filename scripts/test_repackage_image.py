@@ -14,6 +14,8 @@ class FingerprintTests(unittest.TestCase):
         self.tempdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tempdir.name)
         for path in (
+            ".dockerignore",
+            ".github/workflows/repackage.yml",
             "Dockerfile.base-node",
             "repackaging/Dockerfile.mcp-node",
             "Dockerfile.mmmcp",
@@ -46,6 +48,44 @@ class FingerprintTests(unittest.TestCase):
         (self.root / "scripts/mmmcp.sh").write_text("changed", encoding="utf-8")
         second, _ = repackage_image.compute_fingerprint(self.root, self.image, {})
         self.assertNotEqual(first, second)
+
+    def test_shared_build_configuration_changes_node_fingerprint(self):
+        for relative_path in repackage_image.BUILD_FILES:
+            with self.subTest(path=relative_path):
+                target = self.root / relative_path
+                original = target.read_text(encoding="utf-8")
+                first, _ = repackage_image.compute_fingerprint(
+                    self.root, self.image, {}
+                )
+                target.write_text(f"{original}\nchanged", encoding="utf-8")
+                second, _ = repackage_image.compute_fingerprint(
+                    self.root, self.image, {}
+                )
+                target.write_text(original, encoding="utf-8")
+                self.assertNotEqual(first, second)
+
+    def test_shared_build_configuration_changes_docker_fingerprint(self):
+        dockerfile = self.root / "repackaging/Dockerfile.mcp-docker"
+        dockerfile.write_text("FROM example", encoding="utf-8")
+        image = {
+            "name": "docker-example",
+            "type": "docker",
+            "package": "example/image",
+            "version": "1.2.3",
+        }
+        for relative_path in repackage_image.BUILD_FILES:
+            with self.subTest(path=relative_path):
+                target = self.root / relative_path
+                original = target.read_text(encoding="utf-8")
+                first, _ = repackage_image.compute_fingerprint(
+                    self.root, image, {}
+                )
+                target.write_text(f"{original}\nchanged", encoding="utf-8")
+                second, _ = repackage_image.compute_fingerprint(
+                    self.root, image, {}
+                )
+                target.write_text(original, encoding="utf-8")
+                self.assertNotEqual(first, second)
 
     def test_dependency_digest_changes_fingerprint(self):
         first, _ = repackage_image.compute_fingerprint(
@@ -129,6 +169,8 @@ class PlanTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             files = {
+                ".dockerignore": "Dockerfile*",
+                ".github/workflows/repackage.yml": "name: repackage",
                 "Dockerfile.base-node": "FROM example/base",
                 "repackaging/Dockerfile.mcp-node": "FROM base",
                 "Dockerfile.mmmcp": "ARG MMMCP_IMAGE=example/wrapper:v1\n",
@@ -170,6 +212,14 @@ class PlanTests(unittest.TestCase):
     def test_docker_plan_pins_upstream_image(self, crane, resolve):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            shared_files = {
+                ".dockerignore": "Dockerfile*",
+                ".github/workflows/repackage.yml": "name: repackage",
+            }
+            for path, contents in shared_files.items():
+                target = root / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(contents, encoding="utf-8")
             dockerfile = root / "repackaging/Dockerfile.mcp-docker"
             dockerfile.parent.mkdir(parents=True)
             dockerfile.write_text("ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\n", encoding="utf-8")
