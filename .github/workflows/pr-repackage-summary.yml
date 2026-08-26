@@ -77,8 +77,28 @@ jobs:
           script: |
             const fs = require("fs");
             const marker = "<!-- repackage-plan -->";
+            const maxInputBytes = 60000;
             const maxReportLength = 60000;
-            const rawReport = fs.readFileSync(process.env.REPORT_PATH, "utf8");
+            const fileSize = fs.statSync(process.env.REPORT_PATH).size;
+            const input = Buffer.alloc(Math.min(fileSize, maxInputBytes));
+            const descriptor = fs.openSync(process.env.REPORT_PATH, "r");
+            let bytesRead = 0;
+            try {
+              while (bytesRead < input.length) {
+                const count = fs.readSync(
+                  descriptor,
+                  input,
+                  bytesRead,
+                  input.length - bytesRead,
+                  bytesRead,
+                );
+                if (count === 0) break;
+                bytesRead += count;
+              }
+            } finally {
+              fs.closeSync(descriptor);
+            }
+            const rawReport = input.subarray(0, bytesRead).toString("utf8");
             // The artifact is fully controlled by pull-request code. Escape it
             // at this privileged trust boundary and render it as inert text.
             const escapedReport = rawReport
@@ -86,7 +106,7 @@ jobs:
               .replaceAll("<", "&lt;")
               .replaceAll(">", "&gt;")
               .replaceAll("@", "@\u200b");
-            const wasTruncated = escapedReport.length > maxReportLength;
+            const wasTruncated = fileSize > bytesRead || escapedReport.length > maxReportLength;
             const report = escapedReport.slice(0, maxReportLength);
             const truncationNotice = wasTruncated
               ? "\n\n_Report truncated to fit the GitHub comment limit._"
