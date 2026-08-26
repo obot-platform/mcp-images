@@ -1,3 +1,0 @@
-FROM docker.elastic.co/mcp/elasticsearch:0.4.6
-
-ENV HTTP_ADDRESS=0.0.0.0:8080

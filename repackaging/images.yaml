@@ -37,30 +37,10 @@ images:
     version: 0.2.6
     overrides:
       - "mcp==1.29.1"
-  - name: context7
-    type: node
-    package: "@upstash/context7-mcp"
-    version: 4.0.3
-  - name: datadog
-    type: node
-    package: "@winor30/mcp-server-datadog"
-    version: 1.8.0
   - name: duckduckgo-search
     type: python
     package: duckduckgo-mcp-server
     version: 0.6.1
-  - name: exa-search
-    type: node
-    package: exa-mcp-server
-    version: 3.4.1
-  - name: firecrawl
-    type: node
-    package: firecrawl-mcp
-    version: 3.24.0
-  - name: files-com
-    type: python
-    package: files-com-mcp
-    version: 1.0.80
   - name: gitlab
     type: node
     package: "@zereight/mcp-gitlab"
@@ -81,10 +61,6 @@ images:
     type: python
     package: mysql-mcp-server
     version: 0.4.4
-  - name: pagerduty
-    type: python
-    package: pagerduty-mcp
-    version: 1.1.0
   - name: playwright
     type: docker
     package: "mcr.microsoft.com/playwright/mcp"
@@ -95,14 +71,6 @@ images:
     version: 0.3.0
     constraints:
       - "mcp<2"
-  - name: supabase
-    type: node
-    package: "@supabase/mcp-server-supabase"
-    version: 0.11.0
-  - name: digitalocean
-    type: node
-    package: "@digitalocean/mcp"
-    version: 1.0.68
   - name: markitdown-mcp
     type: python
     package: markitdown-mcp
@@ -115,10 +83,6 @@ images:
     type: node
     package: "@brave/brave-search-mcp-server"
     version: 2.1.3
-  - name: dynatrace
-    type: node
-    package: "@dynatrace-oss/dynatrace-mcp-server"
-    version: 2.1.2
   - name: redis
     type: python
     package: redis-mcp-server

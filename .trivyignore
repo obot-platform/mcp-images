@@ -1,7 +1,6 @@
 # zlib1g / MiniZip: Debian does not build MiniZip into zlib1g, so the vulnerable
-# code is not present. Still relevant -- Debian-based images remain in the tree
-# (mcp-servers/Dockerfile.snowflake is python3.12-trixie-slim, and several
-# repackaging/images.yaml entries pull external Debian-based images).
+# code is not present. Still relevant -- several repackaging/images.yaml entries
+# pull external Debian-based images.
 # Refs: https://nvd.nist.gov/vuln/detail/CVE-2023-45853
 #       https://security-tracker.debian.org/tracker/CVE-2023-45853
 CVE-2023-45853

@@ -14,7 +14,6 @@ on:
       - trivy-secret.yaml
       - mcp-servers/**
       - http-webhook-mcp-converter/**
-      - hubspot/**
 jobs:
   docker-build:
     permissions:
@@ -27,11 +26,7 @@ jobs:
       matrix:
         image-identifier:
           - github
-          - hubspot
           - tableau
-          - snowflake
-          - elasticsearch
-          - googlecloudrun
           - http-webhook-mcp-converter
     runs-on: ubuntu-latest
     steps:
@@ -87,11 +82,7 @@ jobs:
       matrix:
         image-identifier:
           - github
-          - hubspot
           - tableau
-          - snowflake
-          - elasticsearch
-          - googlecloudrun
           - http-webhook-mcp-converter
     runs-on: ubuntu-latest
     steps:
