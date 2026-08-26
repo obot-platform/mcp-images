@@ -1,4 +1,8 @@
 images:
+  - name: antv-charts
+    type: node
+    package: "@antv/mcp-server-chart"
+    version: 0.9.10
   - name: aws-api
     type: python
     package: awslabs.aws-api-mcp-server
@@ -23,6 +27,16 @@ images:
     type: node
     package: "@azure/mcp"
     version: 2.0.5
+  - name: browserbase
+    type: node
+    package: "@browserbasehq/mcp"
+    version: 3.0.0
+  - name: chroma
+    type: python
+    package: chroma-mcp
+    version: 0.2.6
+    overrides:
+      - "mcp==1.29.1"
   - name: duckduckgo-search
     type: python
     package: duckduckgo-mcp-server
@@ -35,6 +49,10 @@ images:
     type: docker
     package: "mcp/grafana"
     version: latest
+  - name: mongodb-atlas
+    type: node
+    package: mongodb-mcp-server
+    version: 2.1.0
   - name: mongodb-database
     type: node
     package: mongodb-mcp-server
@@ -43,12 +61,28 @@ images:
     type: python
     package: mysql-mcp-server
     version: 0.4.4
+  - name: playwright
+    type: docker
+    package: "mcr.microsoft.com/playwright/mcp"
+    version: v0.0.79
   - name: postgresql
     type: python
     package: postgres-mcp
     version: 0.3.0
     constraints:
       - "mcp<2"
+  - name: markitdown-mcp
+    type: python
+    package: markitdown-mcp
+    version: 0.0.1a4
+    constraints:
+      - "mammoth~=1.11.0"
+    overrides:
+      - "mcp==1.29.1"
+  - name: brave-search
+    type: node
+    package: "@brave/brave-search-mcp-server"
+    version: 2.1.3
   - name: redis
     type: python
     package: redis-mcp-server
