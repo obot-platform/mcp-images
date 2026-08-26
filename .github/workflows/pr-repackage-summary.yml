@@ -77,10 +77,21 @@ jobs:
           script: |
             const fs = require("fs");
             const marker = "<!-- repackage-plan -->";
-            // Suppress mentions because this report originates from untrusted PR data.
-            const report = fs.readFileSync(process.env.REPORT_PATH, "utf8")
+            const maxReportLength = 60000;
+            const rawReport = fs.readFileSync(process.env.REPORT_PATH, "utf8");
+            // The artifact is fully controlled by pull-request code. Escape it
+            // at this privileged trust boundary and render it as inert text.
+            const escapedReport = rawReport
+              .replaceAll("&", "&amp;")
+              .replaceAll("<", "&lt;")
+              .replaceAll(">", "&gt;")
               .replaceAll("@", "@\u200b");
-            const body = `${marker}\n${report}`;
+            const wasTruncated = escapedReport.length > maxReportLength;
+            const report = escapedReport.slice(0, maxReportLength);
+            const truncationNotice = wasTruncated
+              ? "\n\n_Report truncated to fit the GitHub comment limit._"
+              : "";
+            const body = `${marker}\n## Immutable image revision preview\n\n<pre>${report}</pre>${truncationNotice}`;
             const issue_number = Number(process.env.PR_NUMBER);
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner: context.repo.owner,
