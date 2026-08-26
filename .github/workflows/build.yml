@@ -52,10 +52,11 @@ jobs:
             exit 1
           fi
 
-          echo "## Repackaged image revisions" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Image | Proposed tag | Action | Reason |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| --- | --- | --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          report=repackage-plan.md
+          echo "## Repackaged image revisions" >> "$report"
+          echo "" >> "$report"
+          echo "| Image | Proposed tag | Action | Reason |" >> "$report"
+          echo "| --- | --- | --- | --- |" >> "$report"
           while IFS= read -r image; do
             plan=$(python3 scripts/repackage_image.py \
               --image-json "$image" \
@@ -64,5 +65,13 @@ jobs:
             tag=$(jq -r '.tag' <<<"$plan")
             build=$(jq -r 'if .build then "build" else "reuse" end' <<<"$plan")
             reason=$(jq -r '.reason' <<<"$plan")
-            echo "| $name | \`$tag\` | $build | $reason |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| $name | \`$tag\` | $build | $reason |" >> "$report"
           done < <(jq -c '.[]' <<<"$images")
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload revision preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: repackage-plan
+          path: repackage-plan.md
+          retention-days: 1
