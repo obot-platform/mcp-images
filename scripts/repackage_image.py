@@ -13,11 +13,18 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
+# Bump this when the meaning of the fingerprint changes. That deliberately makes
+# every image compare as changed without introducing a separate global version.
 FINGERPRINT_SCHEMA = 1
+
+# The standard OCI revision label records source provenance. The Obot labels are
+# the machine-readable contract used to decide whether an immutable tag is reusable.
 LABEL_FINGERPRINT = "io.obot.mcp.input-fingerprint"
 LABEL_VERSION = "io.obot.mcp.application.version"
 LABEL_REVISION = "io.obot.mcp.image.revision"
 
+# These paths describe the transitive repository inputs for each image family.
+# File contents are hashed, so shared changes fan out only to affected families.
 COMMON_FILES = ("Dockerfile.mmmcp", "scripts/mmmcp.sh")
 TYPE_FILES = {
     "node": ("Dockerfile.base-node", "repackaging/Dockerfile.mcp-node"),
@@ -31,6 +38,7 @@ class RepackageError(RuntimeError):
 
 
 def canonical_image(image: dict[str, Any]) -> dict[str, Any]:
+    """Validate and retain only manifest fields that can affect an image."""
     image_type = image.get("type")
     if image_type not in TYPE_FILES:
         raise RepackageError(f"unsupported image type: {image_type!r}")
@@ -57,6 +65,7 @@ def canonical_image(image: dict[str, Any]) -> dict[str, Any]:
 
 
 def fingerprint_files(image_type: str) -> tuple[str, ...]:
+    """Return repository inputs that transitively contribute to an image type."""
     files = TYPE_FILES[image_type]
     if image_type in ("node", "python"):
         files += COMMON_FILES
@@ -68,6 +77,7 @@ def compute_fingerprint(
     image: dict[str, Any],
     dependencies: dict[str, str],
 ) -> tuple[str, dict[str, Any]]:
+    """Hash a canonical description of all known effective build inputs."""
     normalized = canonical_image(image)
     file_records = []
     for relative_path in fingerprint_files(normalized["type"]):
@@ -85,6 +95,8 @@ def compute_fingerprint(
         "files": file_records,
         "dependencies": dict(sorted(dependencies.items())),
     }
+    # Canonical JSON avoids revisions caused by dictionary insertion order or
+    # formatting differences in the resolver itself.
     encoded = json.dumps(
         payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
     ).encode()
@@ -110,6 +122,7 @@ def run_crane(arguments: Iterable[str]) -> str:
 
 
 def repository_tags(repository: str) -> list[str]:
+    """List tags, treating a repository that has never been pushed as empty."""
     try:
         return run_crane(["ls", repository]).splitlines()
     except RepackageError as exc:
@@ -120,6 +133,7 @@ def repository_tags(repository: str) -> list[str]:
 
 
 def matching_revisions(tags: Iterable[str], version: str) -> list[int]:
+    """Return numeric revisions from this exact application-version lineage."""
     pattern = re.compile(rf"^{re.escape(version)}-obot([1-9][0-9]*)$")
     return sorted(
         int(match.group(1))
@@ -129,6 +143,7 @@ def matching_revisions(tags: Iterable[str], version: str) -> list[int]:
 
 
 def image_labels(reference: str, platform: str) -> dict[str, str]:
+    """Read labels from one platform config of a multi-platform image."""
     config = json.loads(run_crane(["config", "--platform", platform, reference]))
     labels = config.get("config", {}).get("Labels") or {}
     if not isinstance(labels, dict):
@@ -142,6 +157,7 @@ def resolve_revision(
     fingerprint: str,
     platform: str = "linux/amd64",
 ) -> dict[str, Any]:
+    """Reuse an identical immutable image or allocate its next revision."""
     revisions = matching_revisions(repository_tags(repository), version)
     if not revisions:
         revision = 1
@@ -155,6 +171,8 @@ def resolve_revision(
     latest_revision = revisions[-1]
     latest_tag = f"{version}-obot{latest_revision}"
     labels = image_labels(f"{repository}:{latest_tag}", platform)
+    # A fingerprint alone is insufficient: validating all identity labels keeps
+    # malformed or legacy images from being silently treated as current.
     if (
         labels.get(LABEL_FINGERPRINT) == fingerprint
         and labels.get(LABEL_VERSION) == version
@@ -178,6 +196,7 @@ def resolve_revision(
 
 
 def pinned_reference(reference: str) -> str:
+    """Resolve a mutable image reference to the digest used by the build."""
     digest = run_crane(["digest", reference]).strip()
     if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
         raise RepackageError(f"crane returned an invalid digest for {reference}: {digest}")
@@ -185,6 +204,7 @@ def pinned_reference(reference: str) -> str:
 
 
 def wrapper_reference(root: Path) -> str:
+    """Keep the wrapper source declared once, in Dockerfile.mmmcp."""
     dockerfile = (root / "Dockerfile.mmmcp").read_text(encoding="utf-8")
     match = re.search(r"^ARG\s+MMMCP_IMAGE=([^\s]+)", dockerfile, re.MULTILINE)
     if not match:
@@ -198,11 +218,14 @@ def plan_image(
     registry_prefix: str,
     platform: str = "linux/amd64",
 ) -> dict[str, Any]:
+    """Resolve dependencies, fingerprint inputs, and select the publish tag."""
     normalized = canonical_image(image)
     image_type = normalized["type"]
     dependencies: dict[str, str]
     build_inputs: dict[str, str] = {}
 
+    # Parent references are included in the fingerprint and returned to the
+    # workflow so revision selection and the subsequent build use identical bits.
     if image_type in ("node", "python"):
         base_reference = f"{registry_prefix}/base-{image_type}:main"
         wrapper = wrapper_reference(root)

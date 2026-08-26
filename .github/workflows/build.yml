@@ -26,6 +26,8 @@ jobs:
             docker buildx build --check --file "$dockerfile" .
           done
   repackage-plan:
+    # Preview uses the same live registry resolver as publishing but never pushes.
+    # Reviewers can therefore see which immutable tags a merge would allocate.
     name: Preview immutable image revisions
     permissions:
       contents: read
@@ -40,6 +42,8 @@ jobs:
         env:
           REGISTRY_PREFIX: ghcr.io/${{ github.repository }}
         run: |
+          # Resolve the complete manifest. Unchanged fingerprints report "reuse",
+          # so this also validates transitive shared-input fan-out before merge.
           images=$(yq eval -o=json '[.images[] | select(.type != null) | pick(["name", "type", "package", "version", "constraints", "overrides"])]' repackaging/images.yaml | jq -c .)
           duplicates=$(jq -r 'group_by(.name)[] | select(length > 1) | .[0].name' <<<"$images")
           if [ -n "$duplicates" ]; then

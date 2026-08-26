@@ -4,6 +4,7 @@ on:
   workflow_call:
     inputs:
       image_identifiers:
+        # The publisher passes only language families whose Dockerfiles changed.
         description: JSON array of base image identifiers to publish
         required: false
         type: string
@@ -38,6 +39,8 @@ jobs:
       - name: Resolve Wolfi base image
         id: wolfi
         run: |
+          # Pin the mutable upstream tag so every downstream fingerprint names
+          # the exact parent manifest used by this build.
           digest=$(crane digest cgr.dev/chainguard/wolfi-base:latest)
           echo "image=cgr.dev/chainguard/wolfi-base:latest@${digest}" >> "$GITHUB_OUTPUT"
       - name: Build and push Docker image

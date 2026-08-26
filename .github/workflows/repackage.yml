@@ -1,5 +1,7 @@
 name: Repackage MCP Images
 
+# Called only by publish-repackages.yml so base publication, revision allocation,
+# and final publication share one serialized workflow execution.
 on:
   workflow_call:
 
@@ -16,6 +18,8 @@ jobs:
       - name: Generate matrix from images.yaml
         id: set-matrix
         run: |
+          # The full matrix is intentional: registry fingerprints, rather than a
+          # fragile Git diff, decide which entries actually need to build.
           matrix=$(yq eval -o=json '[.images[] | select(.type != null) | pick(["name", "type", "package", "version", "constraints", "overrides"])]' repackaging/images.yaml | jq -c .)
           duplicates=$(jq -r 'group_by(.name)[] | select(length > 1) | .[0].name' <<<"$matrix")
           if [ -n "$duplicates" ]; then
@@ -63,6 +67,8 @@ jobs:
           IMAGE_JSON: ${{ toJson(matrix) }}
           REGISTRY_PREFIX: ghcr.io/${{ github.repository }}
         run: |
+          # The plan resolves parent digests first, hashes all effective inputs,
+          # then either reuses the latest matching revision or allocates N+1.
           plan=$(python3 scripts/repackage_image.py plan \
             --image-json "$IMAGE_JSON" \
             --registry-prefix "$REGISTRY_PREFIX")
@@ -79,6 +85,8 @@ jobs:
       - name: Refuse immutable tag races
         if: steps.image.outputs.build == 'true'
         run: |
+          # Concurrency is the primary guard; this last-moment check makes an
+          # unexpected external publisher fail closed instead of overwriting.
           if crane manifest "${{ steps.image.outputs.repository }}:${{ steps.image.outputs.tag }}" >/dev/null 2>&1; then
             echo "Immutable tag already exists: ${{ steps.image.outputs.repository }}:${{ steps.image.outputs.tag }}" >&2
             exit 1
@@ -87,6 +95,8 @@ jobs:
       - name: Update moving main alias
         if: steps.image.outputs.build == 'false'
         run: |
+          # Immutable artifacts are reused, but the intentionally mutable preview
+          # alias should always follow the manifest's currently selected revision.
           crane tag "${{ steps.image.outputs.repository }}:${{ steps.image.outputs.tag }}" "${{ matrix.version }}-main"
 
       - name: Check application base image
@@ -98,6 +108,8 @@ jobs:
           EXPECTED_VERSION: ${{ matrix.version }}
           EXPECTED_REVISION: ${{ steps.image.outputs.revision }}
         run: |
+          # A failed run may have pushed this intermediate before the final image.
+          # Reuse it only when all immutable identity labels match; never overwrite it.
           if crane manifest "$REFERENCE" >/dev/null 2>&1; then
             config=$(crane config --platform linux/amd64 "$REFERENCE")
             actual_fingerprint=$(jq -r '.config.Labels["io.obot.mcp.input-fingerprint"] // empty' <<<"$config")
@@ -177,6 +189,8 @@ jobs:
           pull: true
           file: Dockerfile.mmmcp
           platforms: linux/amd64,linux/arm64
+          # Both intermediate parents are digest-pinned by the resolver/build,
+          # ensuring the artifact matches the inputs represented by its label.
           build-args: |
             BASE_IMAGE=${{ steps.image.outputs.repository }}-base@${{ steps.base.outputs.digest }}
             MMMCP_IMAGE=${{ steps.image.outputs.wrapper-image }}
@@ -194,6 +208,8 @@ jobs:
         uses: docker/build-push-action@v6
         id: build-docker
         with:
+          # Rebuilding the upstream image as a no-op FROM layer lets us attach the
+          # same provenance labels used for Node/Python instead of merely retagging.
           context: .
           push: true
           pull: true

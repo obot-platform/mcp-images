@@ -1,5 +1,8 @@
 name: Publish Repackaged MCP Images
 
+# This is the sole publishing entry point. Keeping base-image updates and
+# application repackaging in one call graph prevents consumers from racing a
+# concurrently moving base-*:main tag.
 on:
   workflow_dispatch:
     inputs:
@@ -22,6 +25,8 @@ on:
       - repackaging/**
 
 concurrency:
+  # Revision allocation reads existing registry tags, so publishers must not run
+  # concurrently or two runs could both choose the same next revision.
   group: publish-repackaged-mcp-images
   cancel-in-progress: false
 
@@ -46,6 +51,8 @@ jobs:
           BEFORE_SHA: ${{ github.event.before }}
           REBUILD_BASE_IMAGES: ${{ inputs.rebuild_base_images }}
         run: |
+          # Rebuild only the changed language family. Repackaging later resolves
+          # the resulting base digest before calculating application fingerprints.
           images='[]'
           if [ "$REBUILD_BASE_IMAGES" = "true" ]; then
             images='["base-node","base-python"]'
@@ -70,6 +77,8 @@ jobs:
 
   repackage:
     needs: [changes, base-images]
+    # A skipped base job means no shared base changed; a failed base job must
+    # block publishing so applications never capture the previous base digest.
     if: always() && needs.changes.result == 'success' && (needs.base-images.result == 'success' || needs.base-images.result == 'skipped')
     uses: ./.github/workflows/repackage.yml
     secrets: inherit
