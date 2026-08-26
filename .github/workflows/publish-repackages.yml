@@ -61,11 +61,18 @@ jobs:
             images='["base-node","base-python"]'
           elif [ "${{ github.event_name }}" = "push" ]; then
             changed=$(git diff --name-only "$BEFORE_SHA" "${{ github.sha }}")
-            if grep -qx 'Dockerfile.base-node' <<<"$changed"; then
-              images=$(jq -c '. + ["base-node"]' <<<"$images")
-            fi
-            if grep -qx 'Dockerfile.base-python' <<<"$changed"; then
-              images=$(jq -c '. + ["base-python"]' <<<"$images")
+            # Shared workflow changes can affect both outputs independently of
+            # their Dockerfiles, so rebuild both and let resolved digests decide
+            # whether dependent application revisions actually changed.
+            if grep -qx '.github/workflows/base-images.yml' <<<"$changed"; then
+              images='["base-node","base-python"]'
+            else
+              if grep -qx 'Dockerfile.base-node' <<<"$changed"; then
+                images=$(jq -c '. + ["base-node"]' <<<"$images")
+              fi
+              if grep -qx 'Dockerfile.base-python' <<<"$changed"; then
+                images=$(jq -c '. + ["base-python"]' <<<"$images")
+              fi
             fi
           fi
           echo "base_images=$images" >> "$GITHUB_OUTPUT"
