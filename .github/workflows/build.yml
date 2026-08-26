@@ -67,6 +67,30 @@ jobs:
             reason=$(jq -r '.reason' <<<"$plan")
             echo "| $name | \`$tag\` | $build | $reason |" >> "$report"
           done < <(jq -c '.[]' <<<"$images")
+
+          echo "" >> "$report"
+          echo "## Repository-owned image revisions" >> "$report"
+          echo "" >> "$report"
+          echo "| Image | Proposed tag | Action | Reason |" >> "$report"
+          echo "| --- | --- | --- | --- |" >> "$report"
+          repository_images=$(yq eval -o=json '[.images[] | del(.group)]' repository-images.yaml | jq -c .)
+          duplicates=$(jq -r 'group_by(.name)[] | select(length > 1) | .[0].name' <<<"$repository_images")
+          if [ -n "$duplicates" ]; then
+            echo "Duplicate repository image names:" >&2
+            echo "$duplicates" >&2
+            exit 1
+          fi
+          while IFS= read -r image; do
+            plan=$(python3 scripts/repository_image.py \
+              --image-json "$image" \
+              --version main \
+              --registry-prefix "$REGISTRY_PREFIX")
+            name=$(jq -r '.name' <<<"$image")
+            tag=$(jq -r '.tag' <<<"$plan")
+            build=$(jq -r 'if .build then "build" else "reuse" end' <<<"$plan")
+            reason=$(jq -r '.reason' <<<"$plan")
+            echo "| $name | \`$tag\` | $build | $reason |" >> "$report"
+          done < <(jq -c '.[]' <<<"$repository_images")
           cat "$report" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload revision preview

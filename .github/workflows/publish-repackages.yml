@@ -1,13 +1,12 @@
-name: Publish Repackaged MCP Images
+name: Publish MCP Images
 
-# This is the sole publishing entry point. Keeping base-image updates and
-# application repackaging in one call graph prevents consumers from racing a
-# concurrently moving base-*:main tag.
+# Main-branch publication for every image family is coordinated here so images
+# that consume base-*:main cannot race a shared base rebuild.
 on:
   workflow_dispatch:
     inputs:
       rebuild_base_images:
-        description: Rebuild both shared base images before repackaging
+        description: Rebuild both shared base images before publishing dependents
         required: false
         type: boolean
         default: false
@@ -16,21 +15,30 @@ on:
       - main
     paths:
       - .github/workflows/base-images.yml
+      - .github/workflows/mcp-servers.yml
       - .github/workflows/publish-repackages.yml
       - .github/workflows/repackage.yml
+      - .github/workflows/repository-images.yml
+      - .github/workflows/stdio-wrapper-image.yml
+      - .dockerignore
       - .trivyignore
       - trivy-secret.yaml
       - Dockerfile.base-node
       - Dockerfile.base-python
       - Dockerfile.mmmcp
+      - Dockerfile.stdio-wrapper
+      - http-webhook-mcp-converter/**
+      - mcp-servers/**
+      - repository-images.yaml
       - scripts/mmmcp.sh
       - scripts/repackage_image.py
+      - scripts/repository_image.py
       - repackaging/**
 
 concurrency:
   # Revision allocation reads existing registry tags, so publishers must not run
   # concurrently or two runs could both choose the same next revision.
-  group: publish-repackaged-mcp-images
+  group: publish-mcp-images
   cancel-in-progress: false
 
 permissions:
@@ -44,21 +52,31 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       base_images: ${{ steps.detect.outputs.base_images }}
+      mcp_servers: ${{ steps.detect.outputs.mcp_servers }}
+      repackages: ${{ steps.detect.outputs.repackages }}
+      stdio_wrapper: ${{ steps.detect.outputs.stdio_wrapper }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Detect shared base changes
+      - name: Detect affected image families
         id: detect
         env:
           BEFORE_SHA: ${{ github.event.before }}
           REBUILD_BASE_IMAGES: ${{ inputs.rebuild_base_images }}
         run: |
-          # Rebuild only the changed language family. Repackaging later resolves
-          # the resulting base digest before calculating application fingerprints.
           images='[]'
+          repackages=false
+          mcp_servers=false
+          stdio_wrapper=false
           if [ "$REBUILD_BASE_IMAGES" = "true" ]; then
             images='["base-node","base-python"]'
+          fi
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            repackages=true
+            mcp_servers=true
+            stdio_wrapper=true
           elif [ "${{ github.event_name }}" = "push" ]; then
             changed=$(git diff --name-only "$BEFORE_SHA" "${{ github.sha }}")
             # Shared workflow changes can affect both outputs independently of
@@ -74,8 +92,21 @@ jobs:
                 images=$(jq -c '. + ["base-python"]' <<<"$images")
               fi
             fi
+
+            if grep -Eq '^(\.github/workflows/(base-images|publish-repackages|repackage)\.yml|\.trivyignore|trivy-secret\.yaml|Dockerfile\.base-(node|python)|Dockerfile\.mmmcp|scripts/(mmmcp\.sh|repackage_image\.py)|repackaging/)' <<<"$changed"; then
+              repackages=true
+            fi
+            if grep -Eq '^(\.github/workflows/(base-images|mcp-servers|publish-repackages|repository-images)\.yml|\.dockerignore|\.trivyignore|trivy-secret\.yaml|Dockerfile\.base-node|http-webhook-mcp-converter/|mcp-servers/|repository-images\.yaml|scripts/(repackage_image|repository_image)\.py)' <<<"$changed"; then
+              mcp_servers=true
+            fi
+            if grep -Eq '^(\.github/workflows/(publish-repackages|repository-images|stdio-wrapper-image)\.yml|\.dockerignore|\.trivyignore|trivy-secret\.yaml|Dockerfile\.stdio-wrapper|repository-images\.yaml|scripts/(repackage_image|repository_image)\.py)' <<<"$changed"; then
+              stdio_wrapper=true
+            fi
           fi
           echo "base_images=$images" >> "$GITHUB_OUTPUT"
+          echo "repackages=$repackages" >> "$GITHUB_OUTPUT"
+          echo "mcp_servers=$mcp_servers" >> "$GITHUB_OUTPUT"
+          echo "stdio_wrapper=$stdio_wrapper" >> "$GITHUB_OUTPUT"
 
   base-images:
     needs: changes
@@ -89,6 +120,18 @@ jobs:
     needs: [changes, base-images]
     # A skipped base job means no shared base changed; a failed base job must
     # block publishing so applications never capture the previous base digest.
-    if: always() && needs.changes.result == 'success' && (needs.base-images.result == 'success' || needs.base-images.result == 'skipped')
+    if: always() && needs.changes.result == 'success' && needs.changes.outputs.repackages == 'true' && (needs.base-images.result == 'success' || needs.base-images.result == 'skipped')
     uses: ./.github/workflows/repackage.yml
+    secrets: inherit
+
+  mcp-servers:
+    needs: [changes, base-images]
+    if: always() && needs.changes.result == 'success' && needs.changes.outputs.mcp_servers == 'true' && (needs.base-images.result == 'success' || needs.base-images.result == 'skipped')
+    uses: ./.github/workflows/mcp-servers.yml
+    secrets: inherit
+
+  stdio-wrapper:
+    needs: changes
+    if: needs.changes.outputs.stdio_wrapper == 'true'
+    uses: ./.github/workflows/stdio-wrapper-image.yml
     secrets: inherit

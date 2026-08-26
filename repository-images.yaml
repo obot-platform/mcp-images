@@ -1,0 +1,38 @@
+images:
+  - name: github
+    group: mcp-server
+    catalog: true
+    dockerfile: mcp-servers/Dockerfile.github
+    parents:
+      - arg: GITHUB_IMAGE
+        image: ghcr.io/github/github-mcp-server:latest
+      - arg: MMMCP_IMAGE
+        image: ghcr.io/obot-platform/mmmcp:v0.1.1
+
+  - name: tableau
+    group: mcp-server
+    catalog: true
+    dockerfile: mcp-servers/Dockerfile.tableau
+    parents:
+      - arg: NODE_IMAGE
+        image: node:22-alpine
+
+  - name: http-webhook-mcp-converter
+    group: mcp-server
+    dockerfile: mcp-servers/Dockerfile.http-webhook-mcp-converter
+    paths:
+      - http-webhook-mcp-converter/package.json
+      - http-webhook-mcp-converter/package-lock.json
+      - http-webhook-mcp-converter/server.js
+    parents:
+      - arg: NODE_IMAGE
+        image: node:20-alpine
+
+  - name: stdio-wrapper
+    group: stdio-wrapper
+    dockerfile: Dockerfile.stdio-wrapper
+    parents:
+      - arg: UV_IMAGE
+        image: ghcr.io/astral-sh/uv:0.12.5
+      - arg: MMMCP_IMAGE
+        image: ghcr.io/obot-platform/mmmcp:v0.1.1

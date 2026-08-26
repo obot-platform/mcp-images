@@ -1,6 +1,9 @@
-FROM ghcr.io/github/github-mcp-server AS binary
+ARG GITHUB_IMAGE=ghcr.io/github/github-mcp-server:latest
+ARG MMMCP_IMAGE=ghcr.io/obot-platform/mmmcp:v0.1.1
 
-FROM ghcr.io/obot-platform/mmmcp:v0.1.1
+FROM ${GITHUB_IMAGE} AS binary
+
+FROM ${MMMCP_IMAGE}
 
 COPY --from=binary /server/github-mcp-server .
 
