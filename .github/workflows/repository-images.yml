@@ -67,12 +67,21 @@ jobs:
 
       - name: Refuse an existing revision tag
         if: steps.image.outputs.build == 'true'
+        env:
+          REFERENCE: ${{ steps.image.outputs.repository }}:${{ steps.image.outputs.tag }}
         run: |
           # Serialized callers are the primary guard. This catches a stale or
           # manually-created target that already exists before publication.
-          if crane manifest "${{ steps.image.outputs.repository }}:${{ steps.image.outputs.tag }}" >/dev/null 2>&1; then
-            echo "Immutable tag already exists: ${{ steps.image.outputs.repository }}:${{ steps.image.outputs.tag }}" >&2
+          status=0
+          crane manifest "$REFERENCE" >/dev/null 2>manifest-error.txt || status=$?
+          if [ "$status" -eq 0 ]; then
+            echo "Immutable tag already exists: $REFERENCE" >&2
             exit 1
+          fi
+          if ! grep -Eq 'MANIFEST_UNKNOWN|NAME_UNKNOWN' manifest-error.txt; then
+            echo "Could not verify that immutable tag is absent: $REFERENCE" >&2
+            cat manifest-error.txt >&2
+            exit "$status"
           fi
 
       - name: Build and push immutable image

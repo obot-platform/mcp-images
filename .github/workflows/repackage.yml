@@ -84,12 +84,21 @@ jobs:
 
       - name: Refuse immutable tag races
         if: steps.image.outputs.build == 'true'
+        env:
+          REFERENCE: ${{ steps.image.outputs.repository }}:${{ steps.image.outputs.tag }}
         run: |
           # Concurrency is the primary guard; this last-moment check makes an
           # unexpected external publisher fail closed instead of overwriting.
-          if crane manifest "${{ steps.image.outputs.repository }}:${{ steps.image.outputs.tag }}" >/dev/null 2>&1; then
-            echo "Immutable tag already exists: ${{ steps.image.outputs.repository }}:${{ steps.image.outputs.tag }}" >&2
+          status=0
+          crane manifest "$REFERENCE" >/dev/null 2>manifest-error.txt || status=$?
+          if [ "$status" -eq 0 ]; then
+            echo "Immutable tag already exists: $REFERENCE" >&2
             exit 1
+          fi
+          if ! grep -Eq 'MANIFEST_UNKNOWN|NAME_UNKNOWN' manifest-error.txt; then
+            echo "Could not verify that immutable tag is absent: $REFERENCE" >&2
+            cat manifest-error.txt >&2
+            exit "$status"
           fi
 
       - name: Update moving main alias
@@ -110,7 +119,9 @@ jobs:
         run: |
           # A failed run may have pushed this intermediate before the final image.
           # Reuse it only when all immutable identity labels match; never overwrite it.
-          if crane manifest "$REFERENCE" >/dev/null 2>&1; then
+          status=0
+          crane manifest "$REFERENCE" >/dev/null 2>manifest-error.txt || status=$?
+          if [ "$status" -eq 0 ]; then
             config=$(crane config --platform linux/amd64 "$REFERENCE")
             actual_fingerprint=$(jq -r '.config.Labels["io.obot.mcp.input-fingerprint"] // empty' <<<"$config")
             actual_version=$(jq -r '.config.Labels["io.obot.mcp.application.version"] // empty' <<<"$config")
@@ -122,8 +133,12 @@ jobs:
               exit 1
             fi
             echo "build=false" >> "$GITHUB_OUTPUT"
-          else
+          elif grep -Eq 'MANIFEST_UNKNOWN|NAME_UNKNOWN' manifest-error.txt; then
             echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Could not determine whether application base exists: $REFERENCE" >&2
+            cat manifest-error.txt >&2
+            exit "$status"
           fi
 
       - name: Build and push Python application base
