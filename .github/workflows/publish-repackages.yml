@@ -93,7 +93,7 @@ jobs:
               fi
             fi
 
-            if grep -Eq '^(\.github/workflows/(base-images|publish-repackages|repackage)\.yml|\.trivyignore|trivy-secret\.yaml|Dockerfile\.base-(node|python)|Dockerfile\.mmmcp|scripts/(mmmcp\.sh|repackage_image\.py)|repackaging/)' <<<"$changed"; then
+            if grep -Eq '^(\.github/workflows/(base-images|publish-repackages|repackage)\.yml|\.dockerignore|\.trivyignore|trivy-secret\.yaml|Dockerfile\.base-(node|python)|Dockerfile\.mmmcp|scripts/(mmmcp\.sh|repackage_image\.py)|repackaging/)' <<<"$changed"; then
               repackages=true
             fi
             if grep -Eq '^(\.github/workflows/(base-images|mcp-servers|publish-repackages|repository-images)\.yml|\.dockerignore|\.trivyignore|trivy-secret\.yaml|Dockerfile\.base-node|http-webhook-mcp-converter/|mcp-servers/|repository-images\.yaml|scripts/(repackage_image|repository_image)\.py)' <<<"$changed"; then
