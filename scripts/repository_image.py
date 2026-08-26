@@ -7,12 +7,10 @@ import argparse
 import hashlib
 import json
 import os
-import re
 import stat
-import subprocess
 import sys
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterable
+from typing import Any
 
 import repackage_image
 
@@ -54,36 +52,32 @@ def canonical_image(image: dict[str, Any]) -> dict[str, Any]:
     }
     if "version" in image:
         result["version"] = _nonempty_string(image.get("version"), "version")
+    if "sources" in image:
+        raise RepositoryImageError("image sources are not supported")
 
     paths = image.get("paths", [])
     if not isinstance(paths, list):
         raise RepositoryImageError("image paths must be a list")
     result["paths"] = [_relative_path(path, "paths entry") for path in paths]
 
-    for field, reference_field in (("parents", "image"), ("sources", "repository")):
-        values = image.get(field, [])
-        if not isinstance(values, list):
-            raise RepositoryImageError(f"image {field} must be a list")
-        normalized = []
-        for value in values:
-            if not isinstance(value, dict):
-                raise RepositoryImageError(f"image {field} entries must be objects")
-            entry = {
-                "arg": _nonempty_string(value.get("arg"), f"{field} arg"),
-                reference_field: _nonempty_string(
-                    value.get(reference_field), f"{field} {reference_field}"
-                ),
+    parents = image.get("parents", [])
+    if not isinstance(parents, list):
+        raise RepositoryImageError("image parents must be a list")
+    normalized_parents = []
+    for parent in parents:
+        if not isinstance(parent, dict):
+            raise RepositoryImageError("image parents entries must be objects")
+        normalized_parents.append(
+            {
+                "arg": _nonempty_string(parent.get("arg"), "parents arg"),
+                "image": _nonempty_string(parent.get("image"), "parents image"),
             }
-            if field == "sources":
-                entry["ref"] = _nonempty_string(value.get("ref"), "sources ref")
-            normalized.append(entry)
-        if len({entry["arg"] for entry in normalized}) != len(normalized):
-            raise RepositoryImageError(f"image {field} contains duplicate build args")
-        result[field] = normalized
-
-    all_args = [entry["arg"] for field in ("parents", "sources") for entry in result[field]]
-    if len(set(all_args)) != len(all_args):
-        raise RepositoryImageError("parent and source build args must be unique")
+        )
+    if len({parent["arg"] for parent in normalized_parents}) != len(
+        normalized_parents
+    ):
+        raise RepositoryImageError("image parents contains duplicate build args")
+    result["parents"] = normalized_parents
     return result
 
 
@@ -144,42 +138,13 @@ def compute_fingerprint(
     return f"sha256:{hashlib.sha256(encoded).hexdigest()}", payload
 
 
-def run_git(arguments: Iterable[str]) -> str:
-    command = ["git", *arguments]
-    try:
-        result = subprocess.run(
-            command,
-            check=True,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-    except FileNotFoundError as exc:
-        raise RepositoryImageError("git is required but was not found") from exc
-    except subprocess.CalledProcessError as exc:
-        detail = exc.stderr.strip() or exc.stdout.strip()
-        raise RepositoryImageError(f"{' '.join(command)} failed: {detail}") from exc
-    return result.stdout
-
-
-def resolve_source(repository: str, ref: str) -> str:
-    """Resolve a remote Git ref to the exact commit passed to the Docker build."""
-    lines = run_git(["ls-remote", repository, ref]).splitlines()
-    commits = [line.split()[0] for line in lines if line.split()]
-    if len(commits) != 1 or not re.fullmatch(r"[0-9a-f]{40,64}", commits[0]):
-        raise RepositoryImageError(
-            f"expected one commit for {repository} {ref}, found {len(commits)}"
-        )
-    return commits[0]
-
-
 def plan_image(
     root: Path,
     image: dict[str, Any],
     version: str,
     registry_prefix: str,
 ) -> dict[str, Any]:
-    """Pin remote inputs, fingerprint declared sources, and allocate a revision."""
+    """Pin parent images, fingerprint declared files, and allocate a revision."""
     normalized = canonical_image(image)
     version = normalized.get("version", version)
     dependencies: dict[str, str] = {}
@@ -189,11 +154,6 @@ def plan_image(
         pinned = repackage_image.pinned_reference(parent["image"])
         build_args[parent["arg"]] = pinned
         dependencies[f"parent:{parent['arg']}"] = pinned
-
-    for source in normalized["sources"]:
-        commit = resolve_source(source["repository"], source["ref"])
-        build_args[source["arg"]] = commit
-        dependencies[f"source:{source['arg']}"] = commit
 
     fingerprint, inputs = compute_fingerprint(root, normalized, version, dependencies)
     repository = f"{registry_prefix.rstrip('/')}/{normalized['name']}"

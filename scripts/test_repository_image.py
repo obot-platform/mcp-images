@@ -77,16 +77,19 @@ class RepositoryFingerprintTests(unittest.TestCase):
         with self.assertRaisesRegex(repository_image.RepositoryImageError, "repository"):
             repository_image.canonical_image(self.image)
 
+    def test_remote_sources_are_rejected(self):
+        self.image["sources"] = [
+            {"arg": "SOURCE_COMMIT", "repository": "ext::command", "ref": "main"}
+        ]
+        with self.assertRaisesRegex(repository_image.RepositoryImageError, "sources"):
+            repository_image.canonical_image(self.image)
+
 
 class RepositoryPlanTests(unittest.TestCase):
     @mock.patch("repository_image.repackage_image.resolve_revision")
-    @mock.patch("repository_image.resolve_source")
     @mock.patch("repository_image.repackage_image.pinned_reference")
-    def test_plan_pins_remote_inputs_for_fingerprint_and_build(
-        self, pin, source, revision
-    ):
+    def test_plan_pins_parent_for_fingerprint_and_build(self, pin, revision):
         pin.return_value = "example/base:main@sha256:parent"
-        source.return_value = "a" * 40
         revision.return_value = {
             "build": True,
             "revision": 1,
@@ -98,13 +101,6 @@ class RepositoryPlanTests(unittest.TestCase):
             "dockerfile": "mcp-servers/Dockerfile.example",
             "paths": ["example"],
             "parents": [{"arg": "BASE_IMAGE", "image": "example/base:main"}],
-            "sources": [
-                {
-                    "arg": "SOURCE_COMMIT",
-                    "repository": "https://example.test/source.git",
-                    "ref": "main",
-                }
-            ],
         }
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -127,10 +123,7 @@ class RepositoryPlanTests(unittest.TestCase):
 
         self.assertEqual(
             result["build_args"],
-            {
-                "BASE_IMAGE": "example/base:main@sha256:parent",
-                "SOURCE_COMMIT": "a" * 40,
-            },
+            {"BASE_IMAGE": "example/base:main@sha256:parent"},
         )
         self.assertEqual(result["version"], "1.2.3")
         revision.assert_called_once_with(
