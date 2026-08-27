@@ -76,10 +76,6 @@ jobs:
           DIGEST: ${{ steps.build-and-push.outputs.digest }}
           IMAGE: ghcr.io/${{ github.repository }}/${{ matrix.image-identifier }}:${{ github.ref_name }}
         run: cosign sign --yes "${IMAGE}@${DIGEST}"
-      - name: Copy image to latest tag
-        if: ${{ github.ref_type == 'tag' && !contains(github.ref_name, '-rc') }}
-        run: |
-          crane tag ghcr.io/${{ github.repository }}/${{ matrix.image-identifier }}:${{ github.ref_name }} latest
 
   trivy-scan:
     permissions:
