@@ -159,6 +159,123 @@ class ImagePlanTests(unittest.TestCase):
                 self.root, "utility", image, "ghcr.io/org/repo", "v1.2.3", "tag", "sha"
             )
 
+    @mock.patch("image_plan.plan_image")
+    def test_preview_advances_reused_descendants_of_rebuilt_bases(self, plan):
+        entries = [
+            {
+                "family": "repackage",
+                "image": {"name": "node-example", "type": "node"},
+            },
+            {
+                "family": "repackage",
+                "image": {"name": "python-example", "type": "python"},
+            },
+        ]
+        plan.side_effect = [
+            {
+                "name": "node-example",
+                "version": "1.2.3",
+                "revision": 4,
+                "tag": "1.2.3-obot4",
+                "build": False,
+                "reason": "fingerprint-match",
+            },
+            {
+                "name": "python-example",
+                "version": "2.0.0",
+                "revision": 7,
+                "tag": "2.0.0-obot7",
+                "build": False,
+                "reason": "fingerprint-match",
+            },
+        ]
+
+        report = image_plan.render_preview(
+            self.root,
+            entries,
+            "ghcr.io/org/repo",
+            "sha",
+            {"node"},
+        )
+
+        self.assertIn(
+            "| node-example | `1.2.3-obot5` | build | base-image-will-rebuild |",
+            report,
+        )
+        self.assertIn(
+            "| python-example | `2.0.0-obot7` | reuse | fingerprint-match |",
+            report,
+        )
+
+    @mock.patch("image_plan.plan_image")
+    def test_preview_does_not_double_advance_an_existing_build(self, plan):
+        entries = [
+            {
+                "family": "repackage",
+                "image": {"name": "python-example", "type": "python"},
+            }
+        ]
+        plan.return_value = {
+            "name": "python-example",
+            "version": "2.0.0",
+            "revision": 8,
+            "tag": "2.0.0-obot8",
+            "build": True,
+            "reason": "fingerprint-changed",
+        }
+
+        report = image_plan.render_preview(
+            self.root,
+            entries,
+            "ghcr.io/org/repo",
+            "sha",
+            {"python"},
+        )
+
+        self.assertIn(
+            "| python-example | `2.0.0-obot8` | build | base-image-will-rebuild |",
+            report,
+        )
+
+    @mock.patch("image_plan.plan_image")
+    def test_preview_marks_both_language_families(self, plan):
+        entries = [
+            {"family": "repackage", "image": {"name": "node", "type": "node"}},
+            {
+                "family": "repackage",
+                "image": {"name": "python", "type": "python"},
+            },
+        ]
+        plan.side_effect = [
+            {
+                "name": "node",
+                "version": "1.0.0",
+                "revision": 1,
+                "tag": "1.0.0-obot1",
+                "build": False,
+                "reason": "fingerprint-match",
+            },
+            {
+                "name": "python",
+                "version": "2.0.0",
+                "revision": 2,
+                "tag": "2.0.0-obot2",
+                "build": False,
+                "reason": "fingerprint-match",
+            },
+        ]
+
+        report = image_plan.render_preview(
+            self.root,
+            entries,
+            "ghcr.io/org/repo",
+            "sha",
+            {"node", "python"},
+        )
+
+        self.assertIn("| node | `1.0.0-obot2` | build |", report)
+        self.assertIn("| python | `2.0.0-obot3` | build |", report)
+
 
 class RevisionTests(unittest.TestCase):
     def test_matching_revisions_are_version_scoped_and_numeric(self):

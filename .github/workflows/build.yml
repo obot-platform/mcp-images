@@ -34,12 +34,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup crane
         uses: imjasonh/setup-crane@v0.4
 
       - name: Preview revisions
         env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REGISTRY_PREFIX: ghcr.io/${{ github.repository }}
         run: |
           repackages=$(yq eval -o=json '.images' repackaging/images.yaml | jq -c '[.[] | {family: "repackage", image: .}]')
@@ -52,10 +56,24 @@ jobs:
             echo "$duplicates" >&2
             exit 1
           fi
+          changed=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+          rebuilt_bases='[]'
+          if grep -qx '.github/workflows/base-images.yml' <<<"$changed" || \
+             grep -qx '.dockerignore' <<<"$changed"; then
+            rebuilt_bases='["node","python"]'
+          else
+            if grep -qx 'Dockerfile.base-node' <<<"$changed"; then
+              rebuilt_bases=$(jq -c '. + ["node"]' <<<"$rebuilt_bases")
+            fi
+            if grep -qx 'Dockerfile.base-python' <<<"$changed"; then
+              rebuilt_bases=$(jq -c '. + ["python"]' <<<"$rebuilt_bases")
+            fi
+          fi
           report=repackage-plan.md
           python3 scripts/image_plan.py preview \
             --entries-json "$entries" \
             --registry-prefix "$REGISTRY_PREFIX" \
+            --rebuilt-bases-json "$rebuilt_bases" \
             --source-revision "${{ github.sha }}" > "$report"
           cat "$report" >> "$GITHUB_STEP_SUMMARY"
 

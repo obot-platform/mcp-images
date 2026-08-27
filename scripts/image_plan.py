@@ -475,23 +475,32 @@ def render_preview(
     entries: list[dict[str, Any]],
     registry_prefix: str,
     source_revision: str,
+    rebuilt_bases: set[str] | None = None,
 ) -> str:
+    rebuilt_bases = rebuilt_bases or set()
     sections = (("Revisioned images", True), ("Moving utility images", False))
     plans = [
-        plan_image(
-            root,
-            entry["family"],
-            entry["image"],
-            registry_prefix,
-            "main",
-            "branch",
-            source_revision,
+        (
+            entry,
+            plan_image(
+                root,
+                entry["family"],
+                entry["image"],
+                registry_prefix,
+                "main",
+                "branch",
+                source_revision,
+            ),
         )
         for entry in entries
     ]
     lines = []
     for title, revisioned in sections:
-        selected = [plan for plan in plans if (plan["revision"] is not None) == revisioned]
+        selected = [
+            (entry, plan)
+            for entry, plan in plans
+            if (plan["revision"] is not None) == revisioned
+        ]
         if not selected:
             continue
         lines.extend(
@@ -502,14 +511,25 @@ def render_preview(
                 "| --- | --- | --- | --- |",
             ]
         )
-        for plan in selected:
-            action = "build" if plan["build"] else "reuse"
+        for entry, plan in selected:
+            base_will_rebuild = (
+                entry["family"] == "repackage"
+                and entry["image"].get("type") in rebuilt_bases
+            )
+            action = "build" if plan["build"] or base_will_rebuild else "reuse"
+            tag = plan["tag"]
+            reason = plan["reason"]
+            if base_will_rebuild:
+                reason = "base-image-will-rebuild"
+                if not plan["build"]:
+                    revision = plan["revision"] + 1
+                    tag = f"{plan['version']}-obot{revision}"
             lines.append(
                 "| {name} | `{tag}` | {action} | {reason} |".format(
                     name=html.escape(plan["name"]),
-                    tag=html.escape(plan["tag"]),
+                    tag=html.escape(tag),
                     action=action,
-                    reason=html.escape(plan["reason"]),
+                    reason=html.escape(reason),
                 )
             )
         lines.append("")
@@ -529,6 +549,7 @@ def create_parser() -> argparse.ArgumentParser:
     preview = subparsers.add_parser("preview")
     preview.add_argument("--entries-json", required=True)
     preview.add_argument("--registry-prefix", required=True)
+    preview.add_argument("--rebuilt-bases-json", default="[]")
     preview.add_argument("--source-revision", required=True)
     return parser
 
@@ -552,6 +573,7 @@ def main() -> int:
                 json.loads(args.entries_json),
                 args.registry_prefix,
                 args.source_revision,
+                set(json.loads(args.rebuilt_bases_json)),
             )
         print(result if isinstance(result, str) else json.dumps(result, sort_keys=True))
         return 0
