@@ -29,7 +29,7 @@ class ImagePlanTests(unittest.TestCase):
         image = {
             "name": "example",
             "dockerfile": "Dockerfile.example",
-            "paths": ["example"],
+            "paths": ["example/server.js"],
             "parents": [],
         }
         if version is not None:
@@ -65,7 +65,9 @@ class ImagePlanTests(unittest.TestCase):
         image["parents"] = [{"arg": "BASE_IMAGE", "image": "example/base:main"}]
         with mock.patch("image_plan.pinned_reference", return_value="example/base:main@sha256:abc"):
             adapted = image_plan.repository_adapter(image)
-        self.assertEqual(adapted["paths"], ["Dockerfile.example", "example"])
+        self.assertEqual(
+            adapted["paths"], ["Dockerfile.example", "example/server.js"]
+        )
         self.assertEqual(adapted["build_args"]["BASE_IMAGE"], "example/base:main@sha256:abc")
 
         image["paths"] = ["../secret"]
@@ -77,6 +79,20 @@ class ImagePlanTests(unittest.TestCase):
         image["sources"] = [{"repository": "external"}]
         with self.assertRaisesRegex(image_plan.ImagePlanError, "sources"):
             image_plan.repository_adapter(image)
+
+    def test_fingerprint_rejects_directory_inputs(self):
+        image = self.repository_image()
+        adapted = image_plan.repository_adapter(image)
+        adapted["paths"] = ["example"]
+
+        with self.assertRaisesRegex(image_plan.ImagePlanError, "regular file"):
+            image_plan.compute_fingerprint(
+                self.root,
+                adapted["canonical"],
+                "1.2.3",
+                adapted["paths"],
+                {},
+            )
 
     @mock.patch("image_plan.resolve_revision")
     @mock.patch("image_plan.pinned_reference")

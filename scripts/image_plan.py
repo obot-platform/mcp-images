@@ -7,9 +7,7 @@ import argparse
 import hashlib
 import html
 import json
-import os
 import re
-import stat
 import subprocess
 import sys
 from pathlib import Path, PurePosixPath
@@ -161,37 +159,21 @@ def resolve_revision(
     }
 
 
-def _path_record(root: Path, path: Path) -> dict[str, Any]:
-    metadata = path.lstat()
-    if path.is_symlink():
-        payload = os.readlink(path).encode()
-        kind = "symlink"
-    else:
-        payload = path.read_bytes()
-        kind = "file"
-    return {
-        "path": path.relative_to(root).as_posix(),
-        "kind": kind,
-        "mode": stat.S_IMODE(metadata.st_mode),
-        "sha256": hashlib.sha256(payload).hexdigest(),
-    }
-
-
 def fingerprint_records(root: Path, requested: Iterable[str]) -> list[dict[str, Any]]:
-    files: dict[str, Path] = {}
-    for relative in (*COMMON_PATHS, *requested):
+    records = []
+    for relative in sorted(set((*COMMON_PATHS, *requested))):
         target = root / relative
-        if not target.exists() and not target.is_symlink():
-            raise ImagePlanError(f"fingerprint input does not exist: {relative}")
-        if target.is_symlink() or target.is_file():
-            files[target.relative_to(root).as_posix()] = target
-        elif target.is_dir():
-            for child in target.rglob("*"):
-                if child.is_symlink() or child.is_file():
-                    files[child.relative_to(root).as_posix()] = child
-        else:
-            raise ImagePlanError(f"unsupported fingerprint input: {relative}")
-    return [_path_record(root, files[path]) for path in sorted(files)]
+        if target.is_symlink() or not target.is_file():
+            raise ImagePlanError(
+                f"fingerprint input must be a regular file: {relative}"
+            )
+        records.append(
+            {
+                "path": relative,
+                "sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
+            }
+        )
+    return records
 
 
 def compute_fingerprint(
@@ -239,6 +221,11 @@ def _wrapper_reference(root: Path, image_type: str) -> str:
 def repackage_adapter(
     root: Path, image: dict[str, Any], registry_prefix: str
 ) -> dict[str, Any]:
+    """Translate an NPX/UV/upstream-image entry into generic build inputs.
+
+    Repackages share Dockerfiles by runtime type, so the adapter derives their
+    local inputs and pins every mutable base before fingerprinting and building.
+    """
     if not isinstance(image, dict):
         raise ImagePlanError("image definition must be an object")
     image_type = image.get("type")
@@ -298,6 +285,12 @@ def repackage_adapter(
 
 
 def repository_adapter(image: dict[str, Any]) -> dict[str, Any]:
+    """Translate a repository-owned image entry into generic build inputs.
+
+    These images declare their own Dockerfile, source files, and parent build
+    arguments. Parent references are pinned so planning and building use the
+    same content, while local files remain explicit fingerprint inputs.
+    """
     if not isinstance(image, dict):
         raise ImagePlanError("image definition must be an object")
     name = _nonempty_string(image.get("name"), "name")
