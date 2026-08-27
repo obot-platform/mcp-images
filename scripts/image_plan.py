@@ -16,7 +16,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
 
-FINGERPRINT_SCHEMA = 2
+FINGERPRINT_SCHEMA = 1
 LABEL_FINGERPRINT = "io.obot.mcp.input-fingerprint"
 LABEL_VERSION = "io.obot.mcp.application.version"
 LABEL_REVISION = "io.obot.mcp.image.revision"
