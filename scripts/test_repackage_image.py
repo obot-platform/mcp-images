@@ -18,7 +18,6 @@ class FingerprintTests(unittest.TestCase):
             ".github/workflows/repackage.yml",
             "Dockerfile.base-node",
             "repackaging/Dockerfile.mcp-node",
-            "Dockerfile.mmmcp",
             "scripts/mmmcp.sh",
         ):
             target = self.root / path
@@ -163,6 +162,26 @@ class RevisionTests(unittest.TestCase):
 
 
 class PlanTests(unittest.TestCase):
+    def test_wrapper_reference_uses_language_dockerfile(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dockerfiles = {
+                "node": "example/node-wrapper:v1",
+                "python": "example/python-wrapper:v2",
+            }
+            for image_type, reference in dockerfiles.items():
+                path = root / f"repackaging/Dockerfile.mcp-{image_type}"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(
+                    f"ARG MMMCP_IMAGE={reference}\nFROM base\n", encoding="utf-8"
+                )
+
+            for image_type, reference in dockerfiles.items():
+                with self.subTest(image_type=image_type):
+                    self.assertEqual(
+                        repackage_image.wrapper_reference(root, image_type), reference
+                    )
+
     @mock.patch("repackage_image.resolve_revision")
     @mock.patch("repackage_image.run_crane")
     def test_node_plan_pins_base_and_wrapper(self, crane, resolve):
@@ -172,8 +191,9 @@ class PlanTests(unittest.TestCase):
                 ".dockerignore": "Dockerfile*",
                 ".github/workflows/repackage.yml": "name: repackage",
                 "Dockerfile.base-node": "FROM example/base",
-                "repackaging/Dockerfile.mcp-node": "FROM base",
-                "Dockerfile.mmmcp": "ARG MMMCP_IMAGE=example/wrapper:v1\n",
+                "repackaging/Dockerfile.mcp-node": (
+                    "ARG MMMCP_IMAGE=example/wrapper:v1\nFROM base\n"
+                ),
                 "scripts/mmmcp.sh": "#!/bin/sh",
             }
             for path, contents in files.items():

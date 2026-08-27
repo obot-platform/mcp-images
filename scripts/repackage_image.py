@@ -27,7 +27,7 @@ LABEL_REVISION = "io.obot.mcp.image.revision"
 # workflow and Docker context configuration affect every build, while the MMMCP
 # wrapper is used only by the Node and Python families.
 BUILD_FILES = (".dockerignore", ".github/workflows/repackage.yml")
-WRAPPER_FILES = ("Dockerfile.mmmcp", "scripts/mmmcp.sh")
+WRAPPER_FILES = ("scripts/mmmcp.sh",)
 TYPE_FILES = {
     "node": ("Dockerfile.base-node", "repackaging/Dockerfile.mcp-node"),
     "python": ("Dockerfile.base-python", "repackaging/Dockerfile.mcp-python"),
@@ -205,12 +205,13 @@ def pinned_reference(reference: str) -> str:
     return f"{reference}@{digest}"
 
 
-def wrapper_reference(root: Path) -> str:
-    """Keep the wrapper source declared once, in Dockerfile.mmmcp."""
-    dockerfile = (root / "Dockerfile.mmmcp").read_text(encoding="utf-8")
+def wrapper_reference(root: Path, image_type: str) -> str:
+    """Read the wrapper source from the application Dockerfile default."""
+    dockerfile_path = f"repackaging/Dockerfile.mcp-{image_type}"
+    dockerfile = (root / dockerfile_path).read_text(encoding="utf-8")
     match = re.search(r"^ARG\s+MMMCP_IMAGE=([^\s]+)", dockerfile, re.MULTILINE)
     if not match:
-        raise RepackageError("Dockerfile.mmmcp has no default MMMCP_IMAGE")
+        raise RepackageError(f"{dockerfile_path} has no default MMMCP_IMAGE")
     return match.group(1)
 
 
@@ -230,7 +231,7 @@ def plan_image(
     # workflow so revision selection and the subsequent build use identical bits.
     if image_type in ("node", "python"):
         base_reference = f"{registry_prefix}/base-{image_type}:main"
-        wrapper = wrapper_reference(root)
+        wrapper = wrapper_reference(root, image_type)
         build_inputs["base_image"] = pinned_reference(base_reference)
         build_inputs["wrapper_image"] = pinned_reference(wrapper)
         dependencies = dict(build_inputs)

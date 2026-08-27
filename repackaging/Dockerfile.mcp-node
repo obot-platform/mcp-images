@@ -1,4 +1,7 @@
 ARG BASE_IMAGE=ghcr.io/obot-platform/mcp-images/base-node:main
+ARG MMMCP_IMAGE=ghcr.io/obot-platform/mmmcp:v0.1.1
+
+FROM ${MMMCP_IMAGE} AS mmmcp
 FROM ${BASE_IMAGE}
 
 ARG MCP_PACKAGE
@@ -10,4 +13,21 @@ USER root
 RUN npm install -g "${MCP_PACKAGE}@${MCP_VERSION}" && \
     npm cache clean --force
 
+# Add the transport wrapper after the application so package installation can
+# never replace the wrapper executable or its runtime configuration.
+COPY --from=mmmcp /usr/local/bin/mmmcp /usr/local/bin/
+COPY scripts/mmmcp.sh /usr/local/bin/mmmcp.sh
+
+RUN apk add --no-cache jq && \
+    chmod +x /usr/local/bin/mmmcp.sh && \
+    mkdir -p /home/user/.local/bin && \
+    chown -R 1000:0 /home/user /usr/local
+
 USER 1000
+
+ENV HOME=/home/user \
+    PATH="/home/user/.local/bin:$PATH"
+
+WORKDIR /home/user
+
+ENTRYPOINT ["mmmcp.sh"]
