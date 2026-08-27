@@ -25,7 +25,7 @@ jobs:
           for dockerfile in Dockerfile.* mcp-servers/Dockerfile.* repackaging/Dockerfile.*; do
             docker buildx build --check --file "$dockerfile" .
           done
-  repackage-plan:
+  image-plan:
     # Preview uses the same live registry resolver as publishing but never pushes.
     # Reviewers can therefore see which immutable tags a merge would allocate.
     name: Preview immutable image revisions
@@ -69,7 +69,7 @@ jobs:
               rebuilt_bases=$(jq -c '. + ["python"]' <<<"$rebuilt_bases")
             fi
           fi
-          report=repackage-plan.md
+          report=image-plan.md
           python3 scripts/image_plan.py preview \
             --entries-json "$entries" \
             --registry-prefix "$REGISTRY_PREFIX" \
@@ -77,9 +77,9 @@ jobs:
             --source-revision "${{ github.sha }}" > "$report"
           cat "$report" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload revision preview
+      - name: Upload image plan
         uses: actions/upload-artifact@v4
         with:
-          name: repackage-plan
-          path: repackage-plan.md
+          name: image-plan
+          path: image-plan.md
           retention-days: 1
