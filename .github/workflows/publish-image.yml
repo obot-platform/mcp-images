@@ -24,13 +24,13 @@ jobs:
         run: |
           case "$FAMILY" in
             repackage)
-              images=$(yq eval -o=json '[.images[] | {family: "repackage", image: .}]' repackaging/images.yaml | jq -c .)
+              images=$(yq eval -o=json '.images' repackaging/images.yaml | jq -c '[.[] | {family: "repackage", image: .}]')
               ;;
             repository)
-              images=$(yq eval -o=json '[.images[] | select(.version != null) | {family: "repository", image: (. | del(.group))}]' repository-images.yaml | jq -c .)
+              images=$(yq eval -o=json '.images' repository-images.yaml | jq -c '[.[] | select(.version != null) | {family: "repository", image: del(.group)}]')
               ;;
             utility)
-              images=$(yq eval -o=json '[.images[] | select(.version == null) | {family: "utility", image: (. | del(.group))}]' repository-images.yaml | jq -c .)
+              images=$(yq eval -o=json '.images' repository-images.yaml | jq -c '[.[] | select(.version == null) | {family: "utility", image: del(.group)}]')
               ;;
             *)
               echo "Unsupported image family: $FAMILY" >&2

@@ -42,9 +42,9 @@ jobs:
         env:
           REGISTRY_PREFIX: ghcr.io/${{ github.repository }}
         run: |
-          repackages=$(yq eval -o=json '[.images[] | {family: "repackage", image: .}]' repackaging/images.yaml)
-          repository=$(yq eval -o=json '[.images[] | select(.version != null) | {family: "repository", image: (. | del(.group))}]' repository-images.yaml)
-          utilities=$(yq eval -o=json '[.images[] | select(.version == null) | {family: "utility", image: (. | del(.group))}]' repository-images.yaml)
+          repackages=$(yq eval -o=json '.images' repackaging/images.yaml | jq -c '[.[] | {family: "repackage", image: .}]')
+          repository=$(yq eval -o=json '.images' repository-images.yaml | jq -c '[.[] | select(.version != null) | {family: "repository", image: del(.group)}]')
+          utilities=$(yq eval -o=json '.images' repository-images.yaml | jq -c '[.[] | select(.version == null) | {family: "utility", image: del(.group)}]')
           entries=$(jq -cn --argjson repackages "$repackages" --argjson repository "$repository" --argjson utilities "$utilities" '$repackages + $repository + $utilities')
           duplicates=$(jq -r 'group_by(.image.name)[] | select(length > 1) | .[0].image.name' <<<"$entries")
           if [ -n "$duplicates" ]; then
