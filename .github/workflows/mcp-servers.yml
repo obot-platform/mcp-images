@@ -25,6 +25,11 @@ jobs:
     outputs:
       images: ${{ steps.images.outputs.value }}
     steps:
+      - name: Require main for manual publication
+        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+        run: |
+          echo "Manual publication is allowed only from the main branch" >&2
+          exit 1
       - uses: actions/checkout@v4
       - name: Read MCP server images
         id: images

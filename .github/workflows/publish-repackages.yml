@@ -56,6 +56,11 @@ jobs:
       repackages: ${{ steps.detect.outputs.repackages }}
       stdio_wrapper: ${{ steps.detect.outputs.stdio_wrapper }}
     steps:
+      - name: Require main for manual publication
+        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+        run: |
+          echo "Manual publication is allowed only from the main branch" >&2
+          exit 1
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
