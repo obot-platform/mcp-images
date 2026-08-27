@@ -23,6 +23,7 @@ on:
       - trivy-secret.yaml
       - Dockerfile.base-node
       - Dockerfile.base-python
+      - Dockerfile.mmmcp
       - Dockerfile.stdio-wrapper
       - http-webhook-mcp-converter/**
       - mcp-servers/**
@@ -100,7 +101,7 @@ jobs:
               rescans='["base-node","base-python"]'
             fi
 
-            if grep -Eq '^(\.github/workflows/(base-images|publish-image|publish-images)\.yml|\.dockerignore|\.trivyignore|trivy-secret\.yaml|Dockerfile\.base-(node|python)|repackaging/|scripts/(image_plan\.py|mmmcp\.sh))' <<<"$changed"; then
+            if grep -Eq '^(\.github/workflows/(base-images|publish-image|publish-images)\.yml|\.dockerignore|\.trivyignore|trivy-secret\.yaml|Dockerfile\.(base-(node|python)|mmmcp)|repackaging/|scripts/(image_plan\.py|mmmcp\.sh))' <<<"$changed"; then
               repackages=true
             fi
             # Evaluate the whole affected family. The planner's fingerprints make

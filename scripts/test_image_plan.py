@@ -99,6 +99,11 @@ class ImagePlanTests(unittest.TestCase):
     def test_repackage_plans_pin_node_dependencies(self, pin, revision):
         self.write(
             "repackaging/Dockerfile.mcp-node",
+            "ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\n",
+        )
+        self.write("repackaging/Dockerfile.mcp-python", "ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\n")
+        self.write(
+            "Dockerfile.mmmcp",
             "ARG MMMCP_IMAGE=example/wrapper:v1\nFROM scratch\n",
         )
         self.write("scripts/mmmcp.sh", "#!/bin/sh\n")
@@ -122,9 +127,39 @@ class ImagePlanTests(unittest.TestCase):
 
         self.assertEqual(result["build_args"]["BASE_IMAGE"], "base@sha256:aaa")
         self.assertEqual(result["build_args"]["MMMCP_IMAGE"], "wrapper@sha256:bbb")
+        self.assertTrue(result["application_base"])
+        self.assertEqual(
+            result["application_repository"],
+            "ghcr.io/org/repo/example-base",
+        )
+        self.assertEqual(result["application_tag"], "1.0.0")
+        self.assertNotIn("MMMCP_IMAGE", result["application_build_args"])
+        self.assertEqual(result["wrapper_image"], "wrapper@sha256:bbb")
         self.assertEqual(result["aliases"], ["1.0.0-main"])
         self.assertEqual(result["tags"], ["ghcr.io/org/repo/example:1.0.0-obot1", "ghcr.io/org/repo/example:1.0.0-main"])
         self.assertEqual(result["catalog_payload"]["package"], "pkg")
+
+        pin.side_effect = ["base@sha256:ccc", "wrapper@sha256:ddd"]
+        python_result = image_plan.plan_image(
+            self.root,
+            "repackage",
+            {
+                "name": "python-example",
+                "type": "python",
+                "package": "python-pkg",
+                "version": "2.0.0",
+                "constraints": ["mcp<2"],
+            },
+            "ghcr.io/org/repo",
+            "main",
+            "branch",
+            "source-sha",
+        )
+
+        self.assertEqual(
+            python_result["dockerfile"], "repackaging/Dockerfile.mcp-python"
+        )
+        self.assertEqual(python_result["build_args"]["MCP_CONSTRAINTS"], "mcp<2")
 
     @mock.patch("image_plan.existing_labels")
     def test_utility_main_builds_only_when_fingerprint_changes(self, labels):

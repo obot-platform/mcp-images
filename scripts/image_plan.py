@@ -26,8 +26,16 @@ COMMON_PATHS = (
     "scripts/image_plan.py",
 )
 REPACKAGE_PATHS = {
-    "node": ("repackaging/Dockerfile.mcp-node", "scripts/mmmcp.sh"),
-    "python": ("repackaging/Dockerfile.mcp-python", "scripts/mmmcp.sh"),
+    "node": (
+        "repackaging/Dockerfile.mcp-node",
+        "Dockerfile.mmmcp",
+        "scripts/mmmcp.sh",
+    ),
+    "python": (
+        "repackaging/Dockerfile.mcp-python",
+        "Dockerfile.mmmcp",
+        "scripts/mmmcp.sh",
+    ),
     "docker": ("repackaging/Dockerfile.mcp-docker",),
 }
 
@@ -206,8 +214,8 @@ def _string_list(image: dict[str, Any], field: str) -> list[str]:
     return values
 
 
-def _wrapper_reference(root: Path, image_type: str) -> str:
-    dockerfile = root / f"repackaging/Dockerfile.mcp-{image_type}"
+def _wrapper_reference(root: Path) -> str:
+    dockerfile = root / "Dockerfile.mmmcp"
     match = re.search(
         r"^ARG\s+MMMCP_IMAGE=([^\s]+)",
         dockerfile.read_text(encoding="utf-8"),
@@ -250,7 +258,7 @@ def repackage_adapter(
 
     if image_type in ("node", "python"):
         base = pinned_reference(f"{registry_prefix}/base-{image_type}:main")
-        wrapper = pinned_reference(_wrapper_reference(root, image_type))
+        wrapper = pinned_reference(_wrapper_reference(root))
         dependencies = {"base_image": base, "wrapper_image": wrapper}
         build_args = {
             "MCP_PACKAGE": package,
@@ -281,6 +289,7 @@ def repackage_adapter(
         "catalog": True,
         "catalog_package": package,
         "catalog_type": image_type,
+        "application_base": image_type in ("node", "python"),
     }
 
 
@@ -339,6 +348,7 @@ def repository_adapter(image: dict[str, Any]) -> dict[str, Any]:
         "catalog": image.get("catalog") is True,
         "catalog_package": "",
         "catalog_type": "",
+        "application_base": False,
     }
 
 
@@ -444,6 +454,7 @@ def plan_image(
             "catalog": adapted["catalog"] and configured_version is not None,
             "catalog_package": adapted["catalog_package"],
             "catalog_type": adapted["catalog_type"],
+            "application_base": adapted["application_base"],
         }
     )
     selected["catalog_payload"] = {
@@ -460,6 +471,18 @@ def plan_image(
         )
     if selected["build"]:
         selected["tags"].extend(f"{repository}:{alias}" for alias in aliases)
+    if adapted["application_base"]:
+        application_args = dict(adapted["build_args"])
+        wrapper_image = application_args.pop("MMMCP_IMAGE")
+        selected.update(
+            {
+                "application_build_args": application_args,
+                "application_repository": f"{repository}-base",
+                "application_tag": version,
+                "final_dockerfile": "Dockerfile.mmmcp",
+                "wrapper_image": wrapper_image,
+            }
+        )
     return selected
 
 

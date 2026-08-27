@@ -86,13 +86,16 @@ jobs:
             --ref-type "${{ github.ref_type }}" \
             --source-revision "${{ github.sha }}")
           # Preserve false values: jq's // operator treats false like a missing value.
-          for field in build immutable latest catalog revision tag repository fingerprint version name; do
+          for field in build immutable latest catalog application_base revision tag repository fingerprint version name application_repository application_tag wrapper_image final_dockerfile; do
             value=$(jq -r --arg field "$field" 'if has($field) and .[$field] != null then .[$field] else empty end' <<<"$plan")
             echo "$field=$value" >> "$GITHUB_OUTPUT"
           done
           {
             echo "build-args<<EOF"
             jq -r '.build_args | to_entries[] | "\(.key)=\(.value)"' <<<"$plan"
+            echo "EOF"
+            echo "application-build-args<<EOF"
+            jq -r '.application_build_args // {} | to_entries[] | "\(.key)=\(.value)"' <<<"$plan"
             echo "EOF"
             echo "tags<<EOF"
             jq -r '.tags[]' <<<"$plan"
@@ -126,7 +129,7 @@ jobs:
           fi
 
       - name: Build and push image
-        if: steps.plan.outputs.build == 'true'
+        if: steps.plan.outputs.build == 'true' && steps.plan.outputs.application_base == 'false'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -135,6 +138,37 @@ jobs:
           file: ${{ steps.plan.outputs.dockerfile }}
           platforms: linux/amd64,linux/arm64
           build-args: ${{ steps.plan.outputs.build-args }}
+          tags: ${{ steps.plan.outputs.tags }}
+          labels: ${{ steps.plan.outputs.labels }}
+
+      - name: Build and push mutable application base
+        if: steps.plan.outputs.build == 'true' && steps.plan.outputs.application_base == 'true'
+        id: application-base
+        uses: docker/build-push-action@v6
+        with:
+          # This internal artifact intentionally follows the application version;
+          # only the wrapped image receives immutable obot revision tags.
+          context: .
+          push: true
+          pull: true
+          file: ${{ steps.plan.outputs.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          build-args: ${{ steps.plan.outputs.application-build-args }}
+          tags: ${{ steps.plan.outputs.application_repository }}:${{ steps.plan.outputs.application_tag }}
+
+      - name: Build and push wrapped application
+        if: steps.plan.outputs.build == 'true' && steps.plan.outputs.application_base == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          pull: true
+          file: ${{ steps.plan.outputs.final_dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          # Pin the mutable intermediate by the digest returned by its build.
+          build-args: |
+            BASE_IMAGE=${{ steps.plan.outputs.application_repository }}@${{ steps.application-base.outputs.digest }}
+            MMMCP_IMAGE=${{ steps.plan.outputs.wrapper_image }}
           tags: ${{ steps.plan.outputs.tags }}
           labels: ${{ steps.plan.outputs.labels }}
 
