@@ -7,18 +7,18 @@ FROM ${BASE_IMAGE}
 USER root
 
 COPY --from=mmmcp /usr/local/bin/mmmcp /usr/local/bin/
-COPY scripts/mmmcp.sh /usr/local/bin/mmmcp.sh
+COPY ./scripts/mmmcp.sh /usr/local/bin/mmmcp.sh
 
-RUN apk add --no-cache jq && \
-    chmod +x /usr/local/bin/mmmcp.sh && \
-    mkdir -p /home/user/.local/bin && \
-    chown -R 1000:0 /home/user /usr/local
+RUN apk add jq && chmod +x /usr/local/bin/mmmcp.sh
+
+RUN mkdir -p /home/user/.local/bin && chown -R 1000:0 /home/user && chown -R 1000:0 /usr/local
 
 USER 1000
 
-ENV HOME=/home/user \
-    PATH="/home/user/.local/bin:$PATH"
+ENV HOME=/home/user
 
 WORKDIR /home/user
+
+ENV PATH="/home/user/.local/bin:$PATH"
 
 ENTRYPOINT ["mmmcp.sh"]
