@@ -4,9 +4,9 @@ WORKDIR /app
 # Install git for cloning
 RUN apk add --no-cache git
 
-# Clone Tableau MCP v4.0.5 at a specific commit for reproducibility
+# Clone Tableau MCP v4.7.1 at a specific commit for reproducibility
 ARG TABLEAU_MCP_REPO=https://github.com/tableau/tableau-mcp.git
-ARG TABLEAU_MCP_COMMIT=3561048f52983e6e81f457b705299779109040d1
+ARG TABLEAU_MCP_COMMIT=aa5e8ba8c543e3f2a71b051055fab9bf58484c14
 RUN git clone ${TABLEAU_MCP_REPO} . && \
     git checkout ${TABLEAU_MCP_COMMIT}
 
