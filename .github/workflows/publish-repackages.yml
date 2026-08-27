@@ -19,6 +19,7 @@ on:
       - .github/workflows/publish-repackages.yml
       - .github/workflows/repackage.yml
       - .github/workflows/repository-images.yml
+      - .github/workflows/scan-base-images.yml
       - .github/workflows/stdio-wrapper-image.yml
       - .dockerignore
       - .trivyignore
@@ -52,6 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       base_images: ${{ steps.detect.outputs.base_images }}
+      base_rescans: ${{ steps.detect.outputs.base_rescans }}
       mcp_servers: ${{ steps.detect.outputs.mcp_servers }}
       repackages: ${{ steps.detect.outputs.repackages }}
       stdio_wrapper: ${{ steps.detect.outputs.stdio_wrapper }}
@@ -71,6 +73,7 @@ jobs:
           REBUILD_BASE_IMAGES: ${{ inputs.rebuild_base_images }}
         run: |
           images='[]'
+          rescans='[]'
           repackages=false
           mcp_servers=false
           stdio_wrapper=false
@@ -98,6 +101,12 @@ jobs:
               fi
             fi
 
+            # Scanner policy changes affect findings, not image contents. Scan
+            # the existing base aliases without resolving or rebuilding parents.
+            if grep -Eq '^(\.github/workflows/scan-base-images\.yml|\.trivyignore|trivy-secret\.yaml)$' <<<"$changed"; then
+              rescans='["base-node","base-python"]'
+            fi
+
             if grep -Eq '^(\.github/workflows/(base-images|publish-repackages|repackage)\.yml|\.dockerignore|\.trivyignore|trivy-secret\.yaml|Dockerfile\.base-(node|python)|Dockerfile\.mmmcp|scripts/(mmmcp\.sh|repackage_image\.py)|repackaging/)' <<<"$changed"; then
               repackages=true
             fi
@@ -108,7 +117,12 @@ jobs:
               stdio_wrapper=true
             fi
           fi
+          images=$(jq -c 'unique' <<<"$images")
+          # Rebuilt bases are scanned by base-images.yml after publication, so
+          # keep the direct rescan list limited to images that were not rebuilt.
+          rescans=$(jq -cn --argjson scans "$rescans" --argjson builds "$images" '$scans - $builds | unique')
           echo "base_images=$images" >> "$GITHUB_OUTPUT"
+          echo "base_rescans=$rescans" >> "$GITHUB_OUTPUT"
           echo "repackages=$repackages" >> "$GITHUB_OUTPUT"
           echo "mcp_servers=$mcp_servers" >> "$GITHUB_OUTPUT"
           echo "stdio_wrapper=$stdio_wrapper" >> "$GITHUB_OUTPUT"
@@ -120,6 +134,13 @@ jobs:
     with:
       image_identifiers: ${{ needs.changes.outputs.base_images }}
     secrets: inherit
+
+  base-image-rescans:
+    needs: changes
+    if: needs.changes.outputs.base_rescans != '[]'
+    uses: ./.github/workflows/scan-base-images.yml
+    with:
+      image_identifiers: ${{ needs.changes.outputs.base_rescans }}
 
   repackage:
     needs: [changes, base-images]
