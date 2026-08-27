@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Test repackage image resolver
+      - name: Test image planner
         run: python3 -m unittest discover -s scripts -p 'test_*.py' -v
 
       - name: Set up Docker Buildx
@@ -42,55 +42,21 @@ jobs:
         env:
           REGISTRY_PREFIX: ghcr.io/${{ github.repository }}
         run: |
-          # Resolve the complete manifest. Unchanged fingerprints report "reuse",
-          # so this also validates transitive shared-input fan-out before merge.
-          images=$(yq eval -o=json '[.images[] | select(.type != null) | pick(["name", "type", "package", "version", "constraints", "overrides"])]' repackaging/images.yaml | jq -c .)
-          duplicates=$(jq -r 'group_by(.name)[] | select(length > 1) | .[0].name' <<<"$images")
+          repackages=$(yq eval -o=json '[.images[] | {family: "repackage", image: .}]' repackaging/images.yaml)
+          repository=$(yq eval -o=json '[.images[] | select(.version != null) | {family: "repository", image: (. | del(.group))}]' repository-images.yaml)
+          utilities=$(yq eval -o=json '[.images[] | select(.version == null) | {family: "utility", image: (. | del(.group))}]' repository-images.yaml)
+          entries=$(jq -cn --argjson repackages "$repackages" --argjson repository "$repository" --argjson utilities "$utilities" '$repackages + $repository + $utilities')
+          duplicates=$(jq -r 'group_by(.image.name)[] | select(length > 1) | .[0].image.name' <<<"$entries")
           if [ -n "$duplicates" ]; then
             echo "Duplicate image names:" >&2
             echo "$duplicates" >&2
             exit 1
           fi
-
           report=repackage-plan.md
-          echo "## Repackaged image revisions" >> "$report"
-          echo "" >> "$report"
-          echo "| Image | Proposed tag | Action | Reason |" >> "$report"
-          echo "| --- | --- | --- | --- |" >> "$report"
-          while IFS= read -r image; do
-            plan=$(python3 scripts/repackage_image.py \
-              --image-json "$image" \
-              --registry-prefix "$REGISTRY_PREFIX")
-            name=$(jq -r '.name' <<<"$image")
-            tag=$(jq -r '.tag' <<<"$plan")
-            build=$(jq -r 'if .build then "build" else "reuse" end' <<<"$plan")
-            reason=$(jq -r '.reason' <<<"$plan")
-            echo "| $name | \`$tag\` | $build | $reason |" >> "$report"
-          done < <(jq -c '.[]' <<<"$images")
-
-          echo "" >> "$report"
-          echo "## Repository-owned image revisions" >> "$report"
-          echo "" >> "$report"
-          echo "| Image | Proposed tag | Action | Reason |" >> "$report"
-          echo "| --- | --- | --- | --- |" >> "$report"
-          repository_images=$(yq eval -o=json '[.images[] | del(.group)]' repository-images.yaml | jq -c .)
-          duplicates=$(jq -r 'group_by(.name)[] | select(length > 1) | .[0].name' <<<"$repository_images")
-          if [ -n "$duplicates" ]; then
-            echo "Duplicate repository image names:" >&2
-            echo "$duplicates" >&2
-            exit 1
-          fi
-          while IFS= read -r image; do
-            plan=$(python3 scripts/repository_image.py \
-              --image-json "$image" \
-              --version main \
-              --registry-prefix "$REGISTRY_PREFIX")
-            name=$(jq -r '.name' <<<"$image")
-            tag=$(jq -r '.tag' <<<"$plan")
-            build=$(jq -r 'if .build then "build" else "reuse" end' <<<"$plan")
-            reason=$(jq -r '.reason' <<<"$plan")
-            echo "| $name | \`$tag\` | $build | $reason |" >> "$report"
-          done < <(jq -c '.[]' <<<"$repository_images")
+          python3 scripts/image_plan.py preview \
+            --entries-json "$entries" \
+            --registry-prefix "$REGISTRY_PREFIX" \
+            --source-revision "${{ github.sha }}" > "$report"
           cat "$report" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload revision preview

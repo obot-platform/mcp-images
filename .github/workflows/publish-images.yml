@@ -1,26 +1,23 @@
 name: Publish MCP Images
 
-# Main-branch publication for every image family is coordinated here so images
-# that consume base-*:main cannot race a shared base rebuild.
 on:
   workflow_dispatch:
     inputs:
       rebuild_base_images:
-        description: Rebuild both shared base images before publishing dependents
+        description: Rebuild both shared base images before evaluating applications
         required: false
         type: boolean
         default: false
   push:
     branches:
       - main
+    tags:
+      - "v*"
     paths:
       - .github/workflows/base-images.yml
-      - .github/workflows/mcp-servers.yml
-      - .github/workflows/publish-repackages.yml
-      - .github/workflows/repackage.yml
-      - .github/workflows/repository-images.yml
+      - .github/workflows/publish-image.yml
+      - .github/workflows/publish-images.yml
       - .github/workflows/scan-base-images.yml
-      - .github/workflows/stdio-wrapper-image.yml
       - .dockerignore
       - .trivyignore
       - trivy-secret.yaml
@@ -29,15 +26,12 @@ on:
       - Dockerfile.stdio-wrapper
       - http-webhook-mcp-converter/**
       - mcp-servers/**
-      - repository-images.yaml
-      - scripts/mmmcp.sh
-      - scripts/repackage_image.py
-      - scripts/repository_image.py
       - repackaging/**
+      - repository-images.yaml
+      - scripts/image_plan.py
+      - scripts/mmmcp.sh
 
 concurrency:
-  # Revision allocation reads existing registry tags, so publishers must not run
-  # concurrently or two runs could both choose the same next revision.
   group: publish-mcp-images
   cancel-in-progress: false
 
@@ -53,9 +47,9 @@ jobs:
     outputs:
       base_images: ${{ steps.detect.outputs.base_images }}
       base_rescans: ${{ steps.detect.outputs.base_rescans }}
-      mcp_servers: ${{ steps.detect.outputs.mcp_servers }}
       repackages: ${{ steps.detect.outputs.repackages }}
-      stdio_wrapper: ${{ steps.detect.outputs.stdio_wrapper }}
+      repository: ${{ steps.detect.outputs.repository }}
+      utilities: ${{ steps.detect.outputs.utilities }}
     steps:
       - name: Require main for manual publication
         if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
@@ -74,22 +68,24 @@ jobs:
           images='[]'
           rescans='[]'
           repackages=false
-          mcp_servers=false
-          stdio_wrapper=false
+          repository=false
+          utilities=false
+
           if [ "$REBUILD_BASE_IMAGES" = "true" ]; then
             images='["base-node","base-python"]'
           fi
 
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            utilities=true
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             repackages=true
-            mcp_servers=true
-            stdio_wrapper=true
-          elif [ "${{ github.event_name }}" = "push" ]; then
+            repository=true
+            utilities=true
+          else
             changed=$(git diff --name-only "$BEFORE_SHA" "${{ github.sha }}")
-            # Shared workflow changes can affect both outputs independently of
-            # their Dockerfiles, so rebuild both and let resolved digests decide
-            # whether dependent application revisions actually changed.
-            if grep -qx '.github/workflows/base-images.yml' <<<"$changed"; then
+
+            if grep -qx '.github/workflows/base-images.yml' <<<"$changed" || \
+               grep -qx '.dockerignore' <<<"$changed"; then
               images='["base-node","base-python"]'
             else
               if grep -qx 'Dockerfile.base-node' <<<"$changed"; then
@@ -100,31 +96,30 @@ jobs:
               fi
             fi
 
-            # Scanner policy changes affect findings, not image contents. Scan
-            # the existing base aliases without resolving or rebuilding parents.
             if grep -Eq '^(\.github/workflows/scan-base-images\.yml|\.trivyignore|trivy-secret\.yaml)$' <<<"$changed"; then
               rescans='["base-node","base-python"]'
             fi
 
-            if grep -Eq '^(\.github/workflows/(base-images|publish-repackages|repackage)\.yml|\.dockerignore|\.trivyignore|trivy-secret\.yaml|Dockerfile\.base-(node|python)|scripts/(mmmcp\.sh|repackage_image\.py)|repackaging/)' <<<"$changed"; then
+            if grep -Eq '^(\.github/workflows/(base-images|publish-image|publish-images)\.yml|\.dockerignore|\.trivyignore|trivy-secret\.yaml|Dockerfile\.base-(node|python)|repackaging/|scripts/(image_plan\.py|mmmcp\.sh))' <<<"$changed"; then
               repackages=true
             fi
-            if grep -Eq '^(\.github/workflows/(base-images|mcp-servers|publish-repackages|repository-images)\.yml|\.dockerignore|\.trivyignore|trivy-secret\.yaml|Dockerfile\.base-node|http-webhook-mcp-converter/|mcp-servers/|repository-images\.yaml|scripts/(repackage_image|repository_image)\.py)' <<<"$changed"; then
-              mcp_servers=true
+            # Evaluate the whole affected family. The planner's fingerprints make
+            # unchanged entries cheap no-ops and avoid per-image diff rules here.
+            if grep -Eq '^(\.github/workflows/(publish-image|publish-images)\.yml|\.dockerignore|\.trivyignore|trivy-secret\.yaml|mcp-servers/|repository-images\.yaml|scripts/image_plan\.py)' <<<"$changed"; then
+              repository=true
             fi
-            if grep -Eq '^(\.github/workflows/(publish-repackages|repository-images|stdio-wrapper-image)\.yml|\.dockerignore|\.trivyignore|trivy-secret\.yaml|Dockerfile\.stdio-wrapper|repository-images\.yaml|scripts/(repackage_image|repository_image)\.py)' <<<"$changed"; then
-              stdio_wrapper=true
+            if grep -Eq '^(\.github/workflows/(publish-image|publish-images)\.yml|\.dockerignore|\.trivyignore|trivy-secret\.yaml|Dockerfile\.stdio-wrapper|mcp-servers/|http-webhook-mcp-converter/|repository-images\.yaml|scripts/image_plan\.py)' <<<"$changed"; then
+              utilities=true
             fi
           fi
+
           images=$(jq -c 'unique' <<<"$images")
-          # Rebuilt bases are scanned by base-images.yml after publication, so
-          # keep the direct rescan list limited to images that were not rebuilt.
           rescans=$(jq -cn --argjson scans "$rescans" --argjson builds "$images" '$scans - $builds | unique')
           echo "base_images=$images" >> "$GITHUB_OUTPUT"
           echo "base_rescans=$rescans" >> "$GITHUB_OUTPUT"
           echo "repackages=$repackages" >> "$GITHUB_OUTPUT"
-          echo "mcp_servers=$mcp_servers" >> "$GITHUB_OUTPUT"
-          echo "stdio_wrapper=$stdio_wrapper" >> "$GITHUB_OUTPUT"
+          echo "repository=$repository" >> "$GITHUB_OUTPUT"
+          echo "utilities=$utilities" >> "$GITHUB_OUTPUT"
 
   base-images:
     needs: changes
@@ -141,22 +136,26 @@ jobs:
     with:
       image_identifiers: ${{ needs.changes.outputs.base_rescans }}
 
-  repackage:
+  repackages:
     needs: [changes, base-images]
-    # A skipped base job means no shared base changed; a failed base job must
-    # block publishing so applications never capture the previous base digest.
     if: always() && needs.changes.result == 'success' && needs.changes.outputs.repackages == 'true' && (needs.base-images.result == 'success' || needs.base-images.result == 'skipped')
-    uses: ./.github/workflows/repackage.yml
+    uses: ./.github/workflows/publish-image.yml
+    with:
+      family: repackage
     secrets: inherit
 
-  mcp-servers:
-    needs: [changes, base-images]
-    if: always() && needs.changes.result == 'success' && needs.changes.outputs.mcp_servers == 'true' && (needs.base-images.result == 'success' || needs.base-images.result == 'skipped')
-    uses: ./.github/workflows/mcp-servers.yml
-    secrets: inherit
-
-  stdio-wrapper:
+  repository-images:
     needs: changes
-    if: needs.changes.outputs.stdio_wrapper == 'true'
-    uses: ./.github/workflows/stdio-wrapper-image.yml
+    if: needs.changes.outputs.repository == 'true'
+    uses: ./.github/workflows/publish-image.yml
+    with:
+      family: repository
+    secrets: inherit
+
+  utilities:
+    needs: changes
+    if: needs.changes.outputs.utilities == 'true'
+    uses: ./.github/workflows/publish-image.yml
+    with:
+      family: utility
     secrets: inherit
