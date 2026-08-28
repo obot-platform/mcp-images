@@ -25,3 +25,57 @@ jobs:
           for dockerfile in Dockerfile.* mcp-servers/Dockerfile.* repackaging/Dockerfile.*; do
             docker buildx build --check --file "$dockerfile" .
           done
+
+  image-preview:
+    name: Preview immutable image revisions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: imjasonh/setup-crane@v0.4
+
+      - name: Preview affected revisions
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REGISTRY_PREFIX: ghcr.io/${{ github.repository }}
+        run: |
+          changed=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" | jq -Rsc 'split("\n") | map(select(length > 0))')
+          repackages=$(yq eval -o=json '.images' repackaging/images.yaml | jq -c '[.[] | {family: "repackage", image: .}]')
+          repository=$(yq eval -o=json '.images' repository-images.yaml | jq -c '[.[] | select(.version != null) | {family: "repository", image: del(.group)}]')
+          old_repackages=$(git show "$BASE_SHA:repackaging/images.yaml" | yq eval -o=json '.images' - | jq -c '[.[] | {family: "repackage", image: .}]')
+          old_repository=$(git show "$BASE_SHA:repository-images.yaml" 2>/dev/null | yq eval -o=json '.images' - | jq -c '[.[] | select(.version != null) | {family: "repository", image: del(.group)}]' || echo '[]')
+
+          repackages=$(python3 scripts/image_plan.py select --family repackage --entries-json "$repackages" --previous-entries-json "$old_repackages" --changed-paths-json "$changed")
+          repository=$(python3 scripts/image_plan.py select --family repository --entries-json "$repository" --previous-entries-json "$old_repository" --changed-paths-json "$changed")
+          entries=$(jq -cn --argjson repackages "$repackages" --argjson repository "$repository" '$repackages + $repository')
+
+          {
+            echo "## Proposed immutable image revisions"
+            echo
+            echo "These tags are a read-only preview and may change before publication."
+            echo
+            if [ "$entries" = "[]" ]; then
+              echo "No versioned images are affected."
+            else
+              echo "| Image | Family | Proposed tag |"
+              echo "| --- | --- | --- |"
+              while IFS= read -r entry; do
+                family=$(jq -r '.family' <<<"$entry")
+                image=$(jq -c '.image' <<<"$entry")
+                plan=$(python3 scripts/image_plan.py plan \
+                  --family "$family" \
+                  --image-json "$image" \
+                  --registry-prefix "$REGISTRY_PREFIX" \
+                  --ref-name main \
+                  --ref-type branch \
+                  --source-revision "$HEAD_SHA")
+                name=$(jq -r '.name' <<<"$plan")
+                tag=$(jq -r '.tag' <<<"$plan")
+                printf '| `%s` | %s | `%s` |\n' "$name" "$family" "$tag"
+              done < <(jq -c '.[]' <<<"$entries")
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
