@@ -11,8 +11,6 @@ import sys
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
-LABEL_VERSION = "io.obot.mcp.application.version"
-LABEL_REVISION = "io.obot.mcp.image.revision"
 LABEL_SOURCE_REVISION = "org.opencontainers.image.revision"
 
 
@@ -200,9 +198,7 @@ def plan_image(root: Path, family: str, image: dict[str, Any], registry_prefix: 
     else:
         selected = {"build": True, "revision": None, "tag": ref_name}
         immutable = False
-    labels = {LABEL_SOURCE_REVISION: source_revision, LABEL_VERSION: version}
-    if selected["revision"] is not None:
-        labels[LABEL_REVISION] = str(selected["revision"])
+    labels = {LABEL_SOURCE_REVISION: source_revision}
     selected.update({
         "name": adapted["name"], "family": family, "repository": repository,
         "version": version, "dockerfile": adapted["dockerfile"], "build_args": adapted["build_args"],
