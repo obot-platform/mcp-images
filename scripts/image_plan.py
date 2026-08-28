@@ -133,8 +133,8 @@ def repackage_adapter(root: Path, image: dict[str, Any], registry_prefix: str) -
         build_args = {"BASE_IMAGE": pinned_reference(f"{package}:{version}")}
     return {
         "name": name, "version": version, "dockerfile": f"repackaging/Dockerfile.mcp-{image_type}",
-        "build_args": build_args, "catalog": True, "catalog_package": package,
-        "catalog_type": image_type, "application_base": image_type in ("node", "python"),
+        "build_args": build_args, "catalog": True,
+        "application_base": image_type in ("node", "python"),
     }
 
 
@@ -166,7 +166,7 @@ def repository_adapter(image: dict[str, Any]) -> dict[str, Any]:
     if version is not None:
         version = _nonempty_string(version, "version")
     return {"name": name, "version": version, "dockerfile": dockerfile, "build_args": build_args,
-            "catalog": image.get("catalog") is True, "catalog_package": "", "catalog_type": "", "application_base": False}
+            "catalog": image.get("catalog") is True, "application_base": False}
 
 
 def plan_image(root: Path, family: str, image: dict[str, Any], registry_prefix: str,
@@ -207,8 +207,6 @@ def plan_image(root: Path, family: str, image: dict[str, Any], registry_prefix: 
         "application_base": adapted["application_base"],
     })
     selected["catalog_payload"] = {"image_name": repository, "new_tag": selected["tag"]}
-    if family == "repackage":
-        selected["catalog_payload"].update({"name": adapted["name"], "package": adapted["catalog_package"], "type": adapted["catalog_type"]})
     if adapted["application_base"]:
         application_args = dict(adapted["build_args"])
         wrapper_image = application_args.pop("MMMCP_IMAGE")

@@ -220,7 +220,13 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(result["application_repository"], "ghcr.io/org/repo/example-base")
         self.assertEqual(result["application_tag"], "1.0.0")
         self.assertNotIn("aliases", result)
-        self.assertEqual(result["catalog_payload"]["new_tag"], "1.0.0-obot3")
+        self.assertEqual(
+            result["catalog_payload"],
+            {
+                "image_name": "ghcr.io/org/repo/example",
+                "new_tag": "1.0.0-obot3",
+            },
+        )
 
     @mock.patch("image_plan.resolve_revision")
     @mock.patch("image_plan.pinned_reference", return_value="parent@sha256:aaa")
