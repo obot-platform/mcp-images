@@ -304,27 +304,79 @@ def select_affected(family: str, entries: list[dict[str, Any]], previous_entries
 
 
 def create_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="Select, plan, and inspect MCP image publications."
+    )
     commands = parser.add_subparsers(dest="command", required=True)
-    plan = commands.add_parser("plan")
-    for name in ("family", "image-json", "registry-prefix", "ref-name", "ref-type", "source-revision"):
-        plan.add_argument(f"--{name}", required=True)
-    select = commands.add_parser("select")
-    select.add_argument("--family", required=True)
-    select.add_argument("--manifest", required=True)
-    select.add_argument("--previous-ref", default="")
-    select.add_argument("--base-ref", default="")
-    select.add_argument("--head-ref", default="")
-    select.add_argument("--target", default="")
-    matrix = commands.add_parser("matrix")
-    matrix.add_argument("--family", required=True)
-    matrix.add_argument("--manifest", required=True)
-    changes = commands.add_parser("changes")
-    changes.add_argument("--base-ref", required=True)
-    changes.add_argument("--head-ref", required=True)
-    current = commands.add_parser("current")
-    current.add_argument("--repository", required=True)
-    current.add_argument("--version", required=True)
+    plan = commands.add_parser(
+        "plan",
+        help="create a publication plan for one already-selected image",
+        description=(
+            "Create a complete publication plan for one image. Versioned images "
+            "receive the next registry-backed {version}-obotN tag; unversioned "
+            "utilities use the supplied Git ref. The JSON result is consumed by "
+            "the reusable image publisher."
+        ),
+    )
+    plan.add_argument("--family", required=True, help="repackage, repository, or utility")
+    plan.add_argument("--image-json", required=True, help="one normalized manifest image as JSON")
+    plan.add_argument("--registry-prefix", required=True, help="registry path preceding the image name")
+    plan.add_argument("--ref-name", required=True, help="Git branch or tag name; used by unversioned utilities")
+    plan.add_argument("--ref-type", required=True, help="Git ref type (branch or tag); used by unversioned utilities")
+    plan.add_argument("--source-revision", required=True, help="source commit recorded as an OCI image label")
+
+    select = commands.add_parser(
+        "select",
+        help="select manifest images affected by a Git diff or manual target",
+        description=(
+            "Read a YAML manifest and emit a JSON build matrix containing only "
+            "affected images. Automatic selection compares current entries and "
+            "paths with a previous Git ref; --target selects one repackage for a "
+            "manual rebuild."
+        ),
+    )
+    select.add_argument("--family", required=True, help="manifest family to normalize and select")
+    select.add_argument("--manifest", required=True, help="path to the current YAML image manifest")
+    select.add_argument("--previous-ref", default="", help="Git ref containing the previous manifest; omit for manual selection")
+    select.add_argument("--base-ref", default="", help="base Git ref for changed-path selection")
+    select.add_argument("--head-ref", default="", help="head Git ref for changed-path selection")
+    select.add_argument("--target", default="", help="exact repackage name for a manual rebuild")
+
+    matrix = commands.add_parser(
+        "matrix",
+        help="emit every normalized image in one manifest family",
+        description=(
+            "Read a YAML manifest and emit every image belonging to the requested "
+            "family as a JSON matrix. This intentionally ignores Git diffs and is "
+            "used for release-tag utility builds and full security rescans."
+        ),
+    )
+    matrix.add_argument("--family", required=True, help="manifest family to normalize")
+    matrix.add_argument("--manifest", required=True, help="path to the YAML image manifest")
+
+    changes = commands.add_parser(
+        "changes",
+        help="emit changed repository paths between two Git refs",
+        description=(
+            "Run git diff --name-only for two refs and emit a sorted JSON path "
+            "array. The coordinator uses this for shared-base rebuild and "
+            "security-rescan decisions outside individual image selection."
+        ),
+    )
+    changes.add_argument("--base-ref", required=True, help="base Git ref")
+    changes.add_argument("--head-ref", required=True, help="head Git ref")
+
+    current = commands.add_parser(
+        "current",
+        help="resolve the highest published immutable revision tag",
+        description=(
+            "List registry tags for one image/version and print the highest exact "
+            "{version}-obotN tag. This does not allocate a revision and is used by "
+            "scan-only workflows."
+        ),
+    )
+    current.add_argument("--repository", required=True, help="full image repository without a tag")
+    current.add_argument("--version", required=True, help="application version whose revisions should be inspected")
     return parser
 
 
