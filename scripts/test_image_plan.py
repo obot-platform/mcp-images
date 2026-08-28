@@ -115,6 +115,15 @@ images:
             {"Dockerfile.mmmcp"},
         )
         self.assertEqual(self.names(wrapper), ["node-a", "node-b", "python-a"])
+        base_workflow = image_plan.select_affected(
+            "repackage",
+            self.repackages,
+            self.repackages,
+            {".github/workflows/base-images.yml"},
+        )
+        self.assertEqual(
+            self.names(base_workflow), ["node-a", "node-b", "python-a"]
+        )
 
     def test_type_dockerfile_selects_that_type(self):
         selected = image_plan.select_affected(

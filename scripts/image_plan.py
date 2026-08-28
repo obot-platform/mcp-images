@@ -289,7 +289,12 @@ def select_affected(family: str, entries: list[dict[str, Any]], previous_entries
         types: set[str] = {"node", "python", "docker"} if changed_paths & common else set()
         if changed_paths & {"Dockerfile.base-node", "repackaging/Dockerfile.mcp-node"}: types.add("node")
         if changed_paths & {"Dockerfile.base-python", "repackaging/Dockerfile.mcp-python"}: types.add("python")
-        if changed_paths & {"Dockerfile.mmmcp", "scripts/mmmcp.sh"}: types.update(("node", "python"))
+        if changed_paths & {
+            ".github/workflows/base-images.yml",
+            "Dockerfile.mmmcp",
+            "scripts/mmmcp.sh",
+        }:
+            types.update(("node", "python"))
         if "repackaging/Dockerfile.mcp-docker" in changed_paths: types.add("docker")
         selected.update(name for name, entry in current.items() if entry["image"].get("type") in types)
     else:
