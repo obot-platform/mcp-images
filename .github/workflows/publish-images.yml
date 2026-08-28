@@ -61,26 +61,25 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Install image planner dependencies
+        run: python3 -m pip install --disable-pip-version-check --requirement scripts/image-requirements.txt
       - name: Select affected images
         id: select
         env:
           BEFORE_SHA: ${{ github.event.before }}
           TARGET_IMAGE: ${{ inputs.image }}
         run: |
-          repackages=$(yq eval -o=json '.images' repackaging/images.yaml | jq -c '[.[] | {family: "repackage", image: .}]')
-          repository=$(yq eval -o=json '.images' repository-images.yaml | jq -c '[.[] | select(.version != null) | {family: "repository", image: del(.group)}]')
-          utilities=$(yq eval -o=json '.images' repository-images.yaml | jq -c '[.[] | select(.version == null) | {family: "utility", image: del(.group)}]')
+          repackages=$(python3 scripts/image_plan.py matrix --family repackage --manifest repackaging/images.yaml)
+          repository=$(python3 scripts/image_plan.py matrix --family repository --manifest repository-images.yaml)
+          utilities=$(python3 scripts/image_plan.py matrix --family utility --manifest repository-images.yaml)
           all_entries=$(jq -cn --argjson repackages "$repackages" --argjson repository "$repository" --argjson utilities "$utilities" '$repackages + $repository + $utilities')
-          old_repackages='[]'
-          old_repository='[]'
-          old_utilities='[]'
           changed='[]'
           base_images='[]'
           base_rescans='[]'
           rescans='[]'
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            repackages=$(python3 scripts/image_plan.py select --family repackage --entries-json "$repackages" --target "$TARGET_IMAGE")
+            repackages=$(python3 scripts/image_plan.py select --family repackage --manifest repackaging/images.yaml --target "$TARGET_IMAGE")
             repository='[]'
             utilities='[]'
           elif [ "${{ github.ref_type }}" = "tag" ]; then
@@ -90,14 +89,10 @@ jobs:
             if [ -z "$BEFORE_SHA" ] || [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ]; then
               BEFORE_SHA="${{ github.sha }}^"
             fi
-            changed=$(git diff --name-only "$BEFORE_SHA" "${{ github.sha }}" | jq -Rsc 'split("\n") | map(select(length > 0))')
-            old_repackages=$(git show "$BEFORE_SHA:repackaging/images.yaml" | yq eval -o=json '.images' - | jq -c '[.[] | {family: "repackage", image: .}]')
-            old_repository=$(git show "$BEFORE_SHA:repository-images.yaml" 2>/dev/null | yq eval -o=json '.images' - | jq -c '[.[] | select(.version != null) | {family: "repository", image: del(.group)}]' || echo '[]')
-            old_utilities=$(git show "$BEFORE_SHA:repository-images.yaml" 2>/dev/null | yq eval -o=json '.images' - | jq -c '[.[] | select(.version == null) | {family: "utility", image: del(.group)}]' || echo '[]')
-
-            repackages=$(python3 scripts/image_plan.py select --family repackage --entries-json "$repackages" --previous-entries-json "$old_repackages" --changed-paths-json "$changed")
-            repository=$(python3 scripts/image_plan.py select --family repository --entries-json "$repository" --previous-entries-json "$old_repository" --changed-paths-json "$changed")
-            utilities=$(python3 scripts/image_plan.py select --family utility --entries-json "$utilities" --previous-entries-json "$old_utilities" --changed-paths-json "$changed")
+            changed=$(python3 scripts/image_plan.py changes --base-ref "$BEFORE_SHA" --head-ref "${{ github.sha }}")
+            repackages=$(python3 scripts/image_plan.py select --family repackage --manifest repackaging/images.yaml --previous-ref "$BEFORE_SHA" --base-ref "$BEFORE_SHA" --head-ref "${{ github.sha }}")
+            repository=$(python3 scripts/image_plan.py select --family repository --manifest repository-images.yaml --previous-ref "$BEFORE_SHA" --base-ref "$BEFORE_SHA" --head-ref "${{ github.sha }}")
+            utilities=$(python3 scripts/image_plan.py select --family utility --manifest repository-images.yaml --previous-ref "$BEFORE_SHA" --base-ref "$BEFORE_SHA" --head-ref "${{ github.sha }}")
 
             if jq -e 'index(".github/workflows/base-images.yml") or index(".dockerignore")' <<<"$changed" >/dev/null; then
               base_images='["base-node","base-python"]'

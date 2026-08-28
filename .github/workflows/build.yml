@@ -14,6 +14,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install image planner dependencies
+        run: python3 -m pip install --disable-pip-version-check --requirement scripts/image-requirements.txt
+
       - name: Test image planner
         run: python3 -m unittest discover -s scripts -p 'test_*.py' -v
 
@@ -37,20 +40,17 @@ jobs:
 
       - uses: imjasonh/setup-crane@v0.4
 
+      - name: Install image planner dependencies
+        run: python3 -m pip install --disable-pip-version-check --requirement scripts/image-requirements.txt
+
       - name: Preview affected revisions
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REGISTRY_PREFIX: ghcr.io/${{ github.repository }}
         run: |
-          changed=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" | jq -Rsc 'split("\n") | map(select(length > 0))')
-          repackages=$(yq eval -o=json '.images' repackaging/images.yaml | jq -c '[.[] | {family: "repackage", image: .}]')
-          repository=$(yq eval -o=json '.images' repository-images.yaml | jq -c '[.[] | select(.version != null) | {family: "repository", image: del(.group)}]')
-          old_repackages=$(git show "$BASE_SHA:repackaging/images.yaml" | yq eval -o=json '.images' - | jq -c '[.[] | {family: "repackage", image: .}]')
-          old_repository=$(git show "$BASE_SHA:repository-images.yaml" 2>/dev/null | yq eval -o=json '.images' - | jq -c '[.[] | select(.version != null) | {family: "repository", image: del(.group)}]' || echo '[]')
-
-          repackages=$(python3 scripts/image_plan.py select --family repackage --entries-json "$repackages" --previous-entries-json "$old_repackages" --changed-paths-json "$changed")
-          repository=$(python3 scripts/image_plan.py select --family repository --entries-json "$repository" --previous-entries-json "$old_repository" --changed-paths-json "$changed")
+          repackages=$(python3 scripts/image_plan.py select --family repackage --manifest repackaging/images.yaml --previous-ref "$BASE_SHA" --base-ref "$BASE_SHA" --head-ref "$HEAD_SHA")
+          repository=$(python3 scripts/image_plan.py select --family repository --manifest repository-images.yaml --previous-ref "$BASE_SHA" --base-ref "$BASE_SHA" --head-ref "$HEAD_SHA")
           entries=$(jq -cn --argjson repackages "$repackages" --argjson repository "$repository" '$repackages + $repository')
 
           {

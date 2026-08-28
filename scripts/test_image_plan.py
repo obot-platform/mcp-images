@@ -69,6 +69,23 @@ class SelectionTests(unittest.TestCase):
     def names(self, selected):
         return [item["image"]["name"] for item in selected]
 
+    def test_manifest_loader_builds_family_matrices(self):
+        contents = """
+images:
+  - name: versioned
+    group: mcp-server
+    version: 1.2.3
+    dockerfile: Dockerfile.versioned
+  - name: utility
+    group: utility
+    dockerfile: Dockerfile.utility
+"""
+        repository = image_plan.manifest_entries(contents, "repository")
+        utilities = image_plan.manifest_entries(contents, "utility")
+        self.assertEqual(self.names(repository), ["versioned"])
+        self.assertEqual(self.names(utilities), ["utility"])
+        self.assertNotIn("group", repository[0]["image"])
+
     def test_manifest_change_selects_only_changed_current_entry(self):
         previous = [dict(item) for item in self.repackages]
         previous = [

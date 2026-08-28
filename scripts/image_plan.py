@@ -33,16 +33,19 @@ def _relative_path(value: Any, field: str) -> str:
     return str(path)
 
 
-def run_crane(arguments: Iterable[str]) -> str:
-    command = ["crane", *arguments]
+def run_command(command: list[str]) -> str:
     try:
         result = subprocess.run(command, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except FileNotFoundError as exc:
-        raise ImagePlanError("crane is required but was not found") from exc
+        raise ImagePlanError(f"{command[0]} is required but was not found") from exc
     except subprocess.CalledProcessError as exc:
         detail = exc.stderr.strip() or exc.stdout.strip()
         raise ImagePlanError(f"{' '.join(command)} failed: {detail}") from exc
     return result.stdout
+
+
+def run_crane(arguments: Iterable[str]) -> str:
+    return run_command(["crane", *arguments])
 
 
 def _missing_reference(exc: ImagePlanError) -> bool:
@@ -231,6 +234,49 @@ def _by_name(entries: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return result
 
 
+def manifest_entries(contents: str, family: str) -> list[dict[str, Any]]:
+    try:
+        import yaml
+    except ImportError as exc:
+        raise ImagePlanError(
+            "PyYAML is required for manifest commands; install scripts/image-requirements.txt"
+        ) from exc
+    document = yaml.safe_load(contents)
+    images = document.get("images") if isinstance(document, dict) else None
+    if not isinstance(images, list):
+        raise ImagePlanError("image manifest must contain an images list")
+    entries = []
+    for image in images:
+        if not isinstance(image, dict):
+            raise ImagePlanError("image manifest entries must be objects")
+        configured_version = image.get("version") is not None
+        if family == "repository" and not configured_version:
+            continue
+        if family == "utility" and configured_version:
+            continue
+        normalized = dict(image)
+        normalized.pop("group", None)
+        entries.append({"family": family, "image": normalized})
+    return entries
+
+
+def read_manifest(path: Path, family: str, git_ref: str = "") -> list[dict[str, Any]]:
+    if git_ref:
+        try:
+            contents = run_command(["git", "show", f"{git_ref}:{path.as_posix()}"])
+        except ImagePlanError:
+            if family in ("repository", "utility"):
+                return []
+            raise
+    else:
+        contents = path.read_text(encoding="utf-8")
+    return manifest_entries(contents, family)
+
+
+def changed_paths(base_ref: str, head_ref: str) -> set[str]:
+    return set(run_command(["git", "diff", "--name-only", base_ref, head_ref]).splitlines())
+
+
 def select_affected(family: str, entries: list[dict[str, Any]], previous_entries: list[dict[str, Any]],
                     changed_paths: set[str], target: str = "") -> list[dict[str, Any]]:
     current = _by_name(entries)
@@ -269,10 +315,17 @@ def create_parser() -> argparse.ArgumentParser:
         plan.add_argument(f"--{name}", required=True)
     select = commands.add_parser("select")
     select.add_argument("--family", required=True)
-    select.add_argument("--entries-json", required=True)
-    select.add_argument("--previous-entries-json", default="[]")
-    select.add_argument("--changed-paths-json", default="[]")
+    select.add_argument("--manifest", required=True)
+    select.add_argument("--previous-ref", default="")
+    select.add_argument("--base-ref", default="")
+    select.add_argument("--head-ref", default="")
     select.add_argument("--target", default="")
+    matrix = commands.add_parser("matrix")
+    matrix.add_argument("--family", required=True)
+    matrix.add_argument("--manifest", required=True)
+    changes = commands.add_parser("changes")
+    changes.add_argument("--base-ref", required=True)
+    changes.add_argument("--head-ref", required=True)
     current = commands.add_parser("current")
     current.add_argument("--repository", required=True)
     current.add_argument("--version", required=True)
@@ -286,8 +339,20 @@ def main() -> int:
             result = plan_image(Path("."), args.family, json.loads(args.image_json), args.registry_prefix,
                                 args.ref_name, args.ref_type, args.source_revision)
         elif args.command == "select":
-            result = select_affected(args.family, json.loads(args.entries_json), json.loads(args.previous_entries_json),
-                                     set(json.loads(args.changed_paths_json)), args.target)
+            if bool(args.base_ref) != bool(args.head_ref):
+                raise ImagePlanError("select requires both --base-ref and --head-ref")
+            entries = read_manifest(Path(args.manifest), args.family)
+            previous = (
+                read_manifest(Path(args.manifest), args.family, args.previous_ref)
+                if args.previous_ref
+                else []
+            )
+            paths = changed_paths(args.base_ref, args.head_ref) if args.base_ref else set()
+            result = select_affected(args.family, entries, previous, paths, args.target)
+        elif args.command == "matrix":
+            result = read_manifest(Path(args.manifest), args.family)
+        elif args.command == "changes":
+            result = sorted(changed_paths(args.base_ref, args.head_ref))
         else:
             result = current_revision_tag(args.repository, args.version)
         print(result if isinstance(result, str) else json.dumps(result, sort_keys=True))
