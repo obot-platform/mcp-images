@@ -1,0 +1,58 @@
+name: Scan Existing Images
+
+on:
+  workflow_call:
+    inputs:
+      images_json:
+        description: JSON matrix of images to rescan without rebuilding
+        required: true
+        type: string
+
+jobs:
+  scan:
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(inputs.images_json) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: imjasonh/setup-crane@v0.4
+
+      - name: Resolve current published image
+        id: image
+        env:
+          IMAGE_JSON: ${{ toJson(matrix.image) }}
+          REGISTRY_PREFIX: ghcr.io/${{ github.repository }}
+        run: |
+          name=$(jq -r '.name' <<<"$IMAGE_JSON")
+          version=$(jq -r '.version // empty' <<<"$IMAGE_JSON")
+          repository="$REGISTRY_PREFIX/$name"
+          if [ -n "$version" ]; then
+            tag=$(python3 scripts/image_plan.py current --repository "$repository" --version "$version")
+          else
+            tag="${{ github.ref_name }}"
+          fi
+          {
+            echo "name=$name"
+            echo "reference=$repository:$tag"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.reference }}
+          skip-dirs: "**/venv"
+          format: "sarif"
+          output: trivy-results-${{ steps.image.outputs.name }}.sarif
+
+      - name: Upload SARIF file
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          category: trivy-${{ steps.image.outputs.name }}
+          sarif_file: trivy-results-${{ steps.image.outputs.name }}.sarif
