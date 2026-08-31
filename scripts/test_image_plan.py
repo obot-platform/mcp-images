@@ -124,6 +124,15 @@ images:
         self.assertEqual(
             self.names(base_workflow), ["node-a", "node-b", "python-a"]
         )
+        version_config = image_plan.select_affected(
+            "repackage",
+            self.repackages,
+            self.repackages,
+            {"MMMCP_IMAGE"},
+        )
+        self.assertEqual(
+            self.names(version_config), ["node-a", "node-b", "python-a"]
+        )
 
     def test_type_dockerfile_selects_that_type(self):
         selected = image_plan.select_affected(
@@ -165,28 +174,43 @@ images:
     def test_mmmcp_dependency_selects_all_consumers(self):
         self.assertEqual(
             self.names(
-                image_plan.select_dependency("repackage", self.repackages, "mmmcp")
+                image_plan.select_dependency(
+                    Path("."), "repackage", self.repackages, "mmmcp"
+                )
             ),
             ["node-a", "node-b", "python-a"],
         )
-        entries = [
-            entry(
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            (root / "Dockerfile.github").write_text(
+                "ARG MMMCP_IMAGE=mmmcp:latest\nFROM ${MMMCP_IMAGE}\n",
+                encoding="utf-8",
+            )
+            (root / "Dockerfile.tableau").write_text(
+                "FROM node:22\n", encoding="utf-8"
+            )
+            entries = [
+                entry("repository", "github", dockerfile="Dockerfile.github"),
+                entry("repository", "tableau", dockerfile="Dockerfile.tableau"),
+            ]
+            self.assertEqual(
+                self.names(
+                    image_plan.select_dependency(root, "repository", entries, "mmmcp")
+                ),
+                ["github"],
+            )
+            selected = image_plan.select_affected(
                 "repository",
-                "github",
-                parents=[{"arg": "MMMCP_IMAGE", "image": "mmmcp:latest"}],
-            ),
-            entry(
-                "repository",
-                "tableau",
-                parents=[{"arg": "NODE_IMAGE", "image": "node:22"}],
-            ),
-        ]
-        self.assertEqual(
-            self.names(image_plan.select_dependency("repository", entries, "mmmcp")),
-            ["github"],
-        )
+                entries,
+                entries,
+                {"MMMCP_IMAGE"},
+                root=root,
+            )
+            self.assertEqual(self.names(selected), ["github"])
         with self.assertRaisesRegex(image_plan.ImagePlanError, "unsupported"):
-            image_plan.select_dependency("repackage", self.repackages, "unknown")
+            image_plan.select_dependency(
+                Path("."), "repackage", self.repackages, "unknown"
+            )
 
     def test_manual_target_never_selects_other_families(self):
         repository = [
@@ -239,8 +263,20 @@ class PlanTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tempdir.name)
+        (self.root / "MMMCP_IMAGE").write_text(
+            "ghcr.io/obot-platform/mmmcp:v0.1.1\n", encoding="utf-8"
+        )
         (self.root / "Dockerfile.mmmcp").write_text(
-            "ARG MMMCP_IMAGE=example/wrapper:v1\n", encoding="utf-8"
+            "ARG MMMCP_IMAGE=example/wrapper:latest\n", encoding="utf-8"
+        )
+        (self.root / "Dockerfile.utility").write_text("FROM scratch\n", encoding="utf-8")
+        (self.root / "mcp-servers").mkdir()
+        (self.root / "mcp-servers" / "Dockerfile.tableau").write_text(
+            "FROM node:22\n", encoding="utf-8"
+        )
+        (self.root / "mcp-servers" / "Dockerfile.github").write_text(
+            "ARG MMMCP_IMAGE=example/wrapper:latest\nFROM ${MMMCP_IMAGE}\n",
+            encoding="utf-8",
         )
 
     def tearDown(self):
@@ -263,6 +299,14 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(result["tags"], ["ghcr.io/org/repo/example:1.0.0-obot3"])
         self.assertEqual(result["application_repository"], "ghcr.io/org/repo/example-base")
         self.assertEqual(result["application_tag"], "1.0.0")
+        self.assertEqual(
+            pin.call_args_list,
+            [mock.call("ghcr.io/org/repo/base-node:main")],
+        )
+        self.assertEqual(
+            result["wrapper_image"],
+            "ghcr.io/obot-platform/mmmcp:v0.1.1",
+        )
         self.assertNotIn("aliases", result)
         self.assertEqual(
             result["catalog_payload"],
@@ -292,6 +336,34 @@ class PlanTests(unittest.TestCase):
         )
         self.assertEqual(result["tag"], "4.0.5-obot2")
         self.assertTrue(result["immutable"])
+
+    @mock.patch("image_plan.resolve_revision")
+    @mock.patch("image_plan.pinned_reference")
+    def test_repository_mmmcp_consumer_uses_canonical_version(self, pin, revision):
+        pin.return_value = "github@sha256:aaa"
+        revision.return_value = {"revision": 1, "tag": "1.0.0-obot1"}
+        result = image_plan.plan_image(
+            self.root,
+            "repository",
+            {
+                "name": "github",
+                "version": "1.0.0",
+                "dockerfile": "mcp-servers/Dockerfile.github",
+                "parents": [{"arg": "GITHUB_IMAGE", "image": "github:v1"}],
+            },
+            "ghcr.io/org/repo",
+            "main",
+            "branch",
+            "sha",
+        )
+        self.assertEqual(
+            result["build_args"]["MMMCP_IMAGE"],
+            "ghcr.io/obot-platform/mmmcp:v0.1.1",
+        )
+        self.assertEqual(
+            pin.call_args_list,
+            [mock.call("github:v1")],
+        )
 
     @mock.patch("image_plan.image_labels", return_value=None)
     def test_unversioned_release_behavior_is_preserved(self, _exists):

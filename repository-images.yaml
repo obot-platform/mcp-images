@@ -7,8 +7,6 @@ images:
     parents:
       - arg: GITHUB_IMAGE
         image: ghcr.io/github/github-mcp-server:v1.11.0
-      - arg: MMMCP_IMAGE
-        image: ghcr.io/obot-platform/mmmcp:latest
 
   - name: tableau
     group: mcp-server
@@ -36,5 +34,3 @@ images:
     parents:
       - arg: UV_IMAGE
         image: ghcr.io/astral-sh/uv:0.12.5
-      - arg: MMMCP_IMAGE
-        image: ghcr.io/obot-platform/mmmcp:latest

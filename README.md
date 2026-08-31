@@ -59,9 +59,14 @@ keeps each individual build on one exact parent even when its configured tag is
 mutable.
 
 The shared Node and Python bases use `cgr.dev/chainguard/wolfi-base:latest`
-directly. MMMCP consumers are configured with
-`ghcr.io/obot-platform/mmmcp:latest`; the planner resolves and pins its current
-digest for each selected build.
+directly. The root `MMMCP_IMAGE` file is the single source for the complete
+MMMCP image reference used by CI. The planner passes that reference to every
+MMMCP consumer without resolving it to a digest. Their Dockerfiles default to
+`mmmcp:latest` for direct builds.
+Repository-image parent versions are similarly defined in
+`repository-images.yaml`; their Dockerfile arguments use moving defaults such
+as `latest` or `node:alpine` and CI overrides them with digest-pinned manifest
+references.
 
 ## Manual rebuilds
 
@@ -70,11 +75,11 @@ modes:
 
 - `single-repackage` rebuilds one named repackage.
 - `all-mmmcp-consumers` rebuilds every Node and Python repackage and every
-  repository or utility image configured with an `MMMCP_IMAGE` parent.
+  repository or utility Dockerfile with an `MMMCP_IMAGE` argument.
 
 A manual run intentionally rebuilds the selected images and allocates their next
-immutable revisions. The all-consumers mode is useful for adopting an external
-change to `mmmcp:latest` without creating an artificial Git change.
+immutable revisions. Changing the configured MMMCP version automatically
+selects all consumers; the all-consumers mode can rebuild them without a change.
 
 Manual runs do not compare parent digests with the previous revision and do not
 skip unchanged builds. Single-image targeting applies only to repackages; the

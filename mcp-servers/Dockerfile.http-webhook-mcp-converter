@@ -1,4 +1,4 @@
-ARG NODE_IMAGE=node:20-alpine
+ARG NODE_IMAGE=node:alpine
 FROM ${NODE_IMAGE}
 
 # Set working directory

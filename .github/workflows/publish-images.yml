@@ -33,6 +33,7 @@ on:
       - Dockerfile.base-python
       - Dockerfile.mmmcp
       - Dockerfile.stdio-wrapper
+      - MMMCP_IMAGE
       - http-webhook-mcp-converter/**
       - mcp-servers/**
       - repackaging/**
