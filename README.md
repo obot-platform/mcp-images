@@ -65,14 +65,20 @@ digest for each selected build.
 
 ## Manual rebuilds
 
-The **Publish MCP Images** workflow can be dispatched from `main` with one
-repackage image name. A manual run intentionally rebuilds that image and
-allocates its next immutable revision. This is useful for adopting changes from
-mutable upstream inputs without changing an application version.
+The **Publish MCP Images** workflow can be dispatched from `main` in one of two
+modes:
+
+- `single-repackage` rebuilds one named repackage.
+- `all-mmmcp-consumers` rebuilds every Node and Python repackage and every
+  repository or utility image configured with an `MMMCP_IMAGE` parent.
+
+A manual run intentionally rebuilds the selected images and allocates their next
+immutable revisions. The all-consumers mode is useful for adopting an external
+change to `mmmcp:latest` without creating an artificial Git change.
 
 Manual runs do not compare parent digests with the previous revision and do not
-skip unchanged builds. Manual targeting currently applies only to repackages,
-not repository images or utilities.
+skip unchanged builds. Single-image targeting applies only to repackages; the
+MMMCP mode also includes matching repository images and utilities.
 
 ## Utilities and releases
 

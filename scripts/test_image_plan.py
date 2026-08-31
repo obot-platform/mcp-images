@@ -144,6 +144,50 @@ images:
                 "repackage", self.repackages, [], set(), "missing"
             )
 
+    def test_selection_requires_manual_target_or_complete_git_inputs(self):
+        image_plan.validate_selection_inputs("python-a", "", "", "", "")
+        image_plan.validate_selection_inputs("", "mmmcp", "", "", "")
+        image_plan.validate_selection_inputs("", "", "previous", "base", "head")
+        for inputs in (
+            ("", "", "", "", ""),
+            ("", "", "previous", "", ""),
+            ("", "", "previous", "base", ""),
+        ):
+            with self.assertRaisesRegex(
+                image_plan.ImagePlanError, "requires either --target"
+            ):
+                image_plan.validate_selection_inputs(*inputs)
+        with self.assertRaisesRegex(image_plan.ImagePlanError, "only one"):
+            image_plan.validate_selection_inputs(
+                "python-a", "mmmcp", "", "", ""
+            )
+
+    def test_mmmcp_dependency_selects_all_consumers(self):
+        self.assertEqual(
+            self.names(
+                image_plan.select_dependency("repackage", self.repackages, "mmmcp")
+            ),
+            ["node-a", "node-b", "python-a"],
+        )
+        entries = [
+            entry(
+                "repository",
+                "github",
+                parents=[{"arg": "MMMCP_IMAGE", "image": "mmmcp:latest"}],
+            ),
+            entry(
+                "repository",
+                "tableau",
+                parents=[{"arg": "NODE_IMAGE", "image": "node:22"}],
+            ),
+        ]
+        self.assertEqual(
+            self.names(image_plan.select_dependency("repository", entries, "mmmcp")),
+            ["github"],
+        )
+        with self.assertRaisesRegex(image_plan.ImagePlanError, "unsupported"):
+            image_plan.select_dependency("repackage", self.repackages, "unknown")
+
     def test_manual_target_never_selects_other_families(self):
         repository = [
             entry(

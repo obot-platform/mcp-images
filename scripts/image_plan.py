@@ -271,6 +271,30 @@ def changed_paths(base_ref: str, head_ref: str) -> set[str]:
     return set(run_command(["git", "diff", "--name-only", base_ref, head_ref]).splitlines())
 
 
+def validate_selection_inputs(target: str, dependency: str, previous_ref: str,
+                              base_ref: str, head_ref: str) -> None:
+    if target and dependency:
+        raise ImagePlanError("select accepts only one of --target and --dependency")
+    if target or dependency:
+        return
+    if not previous_ref or not base_ref or not head_ref:
+        raise ImagePlanError(
+            "select requires either --target or --previous-ref, --base-ref, and --head-ref"
+        )
+
+
+def select_dependency(family: str, entries: list[dict[str, Any]], dependency: str) -> list[dict[str, Any]]:
+    if dependency != "mmmcp":
+        raise ImagePlanError(f"unsupported image dependency: {dependency}")
+    if family == "repackage":
+        return [entry for entry in entries if entry["image"].get("type") in ("node", "python")]
+    return [
+        entry
+        for entry in entries
+        if any(parent.get("arg") == "MMMCP_IMAGE" for parent in entry["image"].get("parents", []))
+    ]
+
+
 def select_affected(family: str, entries: list[dict[str, Any]], previous_entries: list[dict[str, Any]],
                     changed_paths: set[str], target: str = "") -> list[dict[str, Any]]:
     current = _by_name(entries)
@@ -334,8 +358,8 @@ def create_parser() -> argparse.ArgumentParser:
         description=(
             "Read a YAML manifest and emit a JSON build matrix containing only "
             "affected images. Automatic selection compares current entries and "
-            "paths with a previous Git ref; --target selects one repackage for a "
-            "manual rebuild."
+            "paths with a previous Git ref; --target selects one repackage and "
+            "--dependency selects every consumer of a shared dependency."
         ),
     )
     select.add_argument("--family", required=True, help="manifest family to normalize and select")
@@ -344,6 +368,7 @@ def create_parser() -> argparse.ArgumentParser:
     select.add_argument("--base-ref", default="", help="base Git ref for changed-path selection")
     select.add_argument("--head-ref", default="", help="head Git ref for changed-path selection")
     select.add_argument("--target", default="", help="exact repackage name for a manual rebuild")
+    select.add_argument("--dependency", default="", help="shared dependency whose consumers should be rebuilt")
 
     matrix = commands.add_parser(
         "matrix",
@@ -392,6 +417,9 @@ def main() -> int:
         elif args.command == "select":
             if bool(args.base_ref) != bool(args.head_ref):
                 raise ImagePlanError("select requires both --base-ref and --head-ref")
+            validate_selection_inputs(
+                args.target, args.dependency, args.previous_ref, args.base_ref, args.head_ref
+            )
             entries = read_manifest(Path(args.manifest), args.family)
             previous = (
                 read_manifest(Path(args.manifest), args.family, args.previous_ref)
@@ -399,7 +427,11 @@ def main() -> int:
                 else []
             )
             paths = changed_paths(args.base_ref, args.head_ref) if args.base_ref else set()
-            result = select_affected(args.family, entries, previous, paths, args.target)
+            result = (
+                select_dependency(args.family, entries, args.dependency)
+                if args.dependency
+                else select_affected(args.family, entries, previous, paths, args.target)
+            )
         elif args.command == "matrix":
             result = read_manifest(Path(args.manifest), args.family)
         elif args.command == "changes":

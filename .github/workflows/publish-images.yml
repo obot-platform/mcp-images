@@ -3,9 +3,17 @@ name: Publish MCP Images
 on:
   workflow_dispatch:
     inputs:
-      image:
-        description: Repackage image name to rebuild
+      mode:
+        description: Images to rebuild
         required: true
+        type: choice
+        default: single-repackage
+        options:
+          - single-repackage
+          - all-mmmcp-consumers
+      image:
+        description: Repackage image name (required for single-repackage)
+        required: false
         type: string
   push:
     branches:
@@ -67,6 +75,7 @@ jobs:
         id: select
         env:
           BEFORE_SHA: ${{ github.event.before }}
+          REBUILD_MODE: ${{ inputs.mode }}
           TARGET_IMAGE: ${{ inputs.image }}
         run: |
           repackages=$(python3 scripts/image_plan.py matrix --family repackage --manifest repackaging/images.yaml)
@@ -79,9 +88,22 @@ jobs:
           rescans='[]'
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            repackages=$(python3 scripts/image_plan.py select --family repackage --manifest repackaging/images.yaml --target "$TARGET_IMAGE")
-            repository='[]'
-            utilities='[]'
+            if [ "$REBUILD_MODE" = "single-repackage" ]; then
+              if [ -z "$TARGET_IMAGE" ]; then
+                echo "A repackage image name is required in single-repackage mode" >&2
+                exit 1
+              fi
+              repackages=$(python3 scripts/image_plan.py select --family repackage --manifest repackaging/images.yaml --target "$TARGET_IMAGE")
+              repository='[]'
+              utilities='[]'
+            elif [ "$REBUILD_MODE" = "all-mmmcp-consumers" ]; then
+              repackages=$(python3 scripts/image_plan.py select --family repackage --manifest repackaging/images.yaml --dependency mmmcp)
+              repository=$(python3 scripts/image_plan.py select --family repository --manifest repository-images.yaml --dependency mmmcp)
+              utilities=$(python3 scripts/image_plan.py select --family utility --manifest repository-images.yaml --dependency mmmcp)
+            else
+              echo "Unknown manual rebuild mode: $REBUILD_MODE" >&2
+              exit 1
+            fi
           elif [ "${{ github.ref_type }}" = "tag" ]; then
             repackages='[]'
             repository='[]'
