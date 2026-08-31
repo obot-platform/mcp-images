@@ -1,5 +1,4 @@
-ARG BASE_IMAGE=cgr.dev/chainguard/wolfi-base:latest
-FROM ${BASE_IMAGE}
+FROM cgr.dev/chainguard/wolfi-base:latest
 
 LABEL org.opencontainers.image.source="https://github.com/obot-platform/mcp-images" \
       org.opencontainers.image.description="Node.js base image for MCP servers"
