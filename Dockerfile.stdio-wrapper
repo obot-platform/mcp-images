@@ -1,5 +1,5 @@
 ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.12.5
-ARG MMMCP_IMAGE=ghcr.io/obot-platform/mmmcp:v0.1.1
+ARG MMMCP_IMAGE=ghcr.io/obot-platform/mmmcp:latest
 FROM ${UV_IMAGE} AS uv-bin
 
 FROM ${MMMCP_IMAGE}
