@@ -1,0 +1,33 @@
+images:
+  - name: github
+    group: mcp-server
+    catalog: true
+    version: "1.11.0"
+    dockerfile: mcp-servers/Dockerfile.github
+    parents:
+      - arg: GITHUB_IMAGE
+        image: ghcr.io/github/github-mcp-server:v1.11.0
+
+  - name: tableau
+    group: mcp-server
+    catalog: true
+    version: "4.0.5"
+    dockerfile: mcp-servers/Dockerfile.tableau
+    parents:
+      - arg: NODE_IMAGE
+        image: node:22-alpine
+
+  - name: http-webhook-mcp-converter
+    group: mcp-server
+    dockerfile: mcp-servers/Dockerfile.http-webhook-mcp-converter
+    paths:
+      - http-webhook-mcp-converter/package.json
+      - http-webhook-mcp-converter/package-lock.json
+      - http-webhook-mcp-converter/server.js
+    parents:
+      - arg: NODE_IMAGE
+        image: node:20-alpine
+
+  - name: stdio-wrapper
+    group: stdio-wrapper
+    dockerfile: Dockerfile.stdio-wrapper

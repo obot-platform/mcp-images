@@ -1,4 +1,6 @@
-FROM ghcr.io/astral-sh/uv:0.12.5 AS uv-bin
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:latest
+
+FROM ${UV_IMAGE} AS uv-bin
 
 FROM cgr.dev/chainguard/wolfi-base:latest
 

@@ -1,0 +1,191 @@
+name: Publish MCP Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Images to rebuild
+        required: true
+        type: choice
+        default: single-repackage
+        options:
+          - single-repackage
+          - all-mmmcp-consumers
+      image:
+        description: Repackage image name (required for single-repackage)
+        required: false
+        type: string
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+    paths:
+      - .github/workflows/base-images.yml
+      - .github/workflows/publish-image.yml
+      - .github/workflows/publish-images.yml
+      - .github/workflows/scan-base-images.yml
+      - .github/workflows/scan-images.yml
+      - .dockerignore
+      - .trivyignore
+      - trivy-secret.yaml
+      - Dockerfile.base-node
+      - Dockerfile.base-python
+      - Dockerfile.mmmcp
+      - Dockerfile.stdio-wrapper
+      - MMMCP_IMAGE
+      - UV_IMAGE
+      - http-webhook-mcp-converter/**
+      - mcp-servers/**
+      - repackaging/**
+      - repository-images.yaml
+      - scripts/image_plan.py
+      - scripts/mmmcp.sh
+
+concurrency:
+  group: publish-mcp-images
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+  id-token: write
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      base_images: ${{ steps.select.outputs.base_images }}
+      base_rescans: ${{ steps.select.outputs.base_rescans }}
+      repackages: ${{ steps.select.outputs.repackages }}
+      repository: ${{ steps.select.outputs.repository }}
+      utilities: ${{ steps.select.outputs.utilities }}
+      rescans: ${{ steps.select.outputs.rescans }}
+    steps:
+      - name: Require main for manual publication
+        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+        run: |
+          echo "Manual publication is allowed only from the main branch" >&2
+          exit 1
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install image planner dependencies
+        run: python3 -m pip install --disable-pip-version-check --requirement scripts/image-requirements.txt
+      - name: Select affected images
+        id: select
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          REBUILD_MODE: ${{ inputs.mode }}
+          TARGET_IMAGE: ${{ inputs.image }}
+        run: |
+          repackages=$(python3 scripts/image_plan.py matrix --family repackage --manifest repackaging/images.yaml)
+          repository=$(python3 scripts/image_plan.py matrix --family repository --manifest repository-images.yaml)
+          utilities=$(python3 scripts/image_plan.py matrix --family utility --manifest repository-images.yaml)
+          all_entries=$(jq -cn --argjson repackages "$repackages" --argjson repository "$repository" --argjson utilities "$utilities" '$repackages + $repository + $utilities')
+          changed='[]'
+          base_images='[]'
+          base_rescans='[]'
+          rescans='[]'
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "$REBUILD_MODE" = "single-repackage" ]; then
+              if [ -z "$TARGET_IMAGE" ]; then
+                echo "A repackage image name is required in single-repackage mode" >&2
+                exit 1
+              fi
+              repackages=$(python3 scripts/image_plan.py select --family repackage --manifest repackaging/images.yaml --target "$TARGET_IMAGE")
+              repository='[]'
+              utilities='[]'
+            elif [ "$REBUILD_MODE" = "all-mmmcp-consumers" ]; then
+              repackages=$(python3 scripts/image_plan.py select --family repackage --manifest repackaging/images.yaml --dependency mmmcp)
+              repository=$(python3 scripts/image_plan.py select --family repository --manifest repository-images.yaml --dependency mmmcp)
+              utilities=$(python3 scripts/image_plan.py select --family utility --manifest repository-images.yaml --dependency mmmcp)
+            else
+              echo "Unknown manual rebuild mode: $REBUILD_MODE" >&2
+              exit 1
+            fi
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            repackages='[]'
+            repository='[]'
+          else
+            if [ -z "$BEFORE_SHA" ] || [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ]; then
+              BEFORE_SHA="${{ github.sha }}^"
+            fi
+            changed=$(python3 scripts/image_plan.py changes --base-ref "$BEFORE_SHA" --head-ref "${{ github.sha }}")
+            repackages=$(python3 scripts/image_plan.py select --family repackage --manifest repackaging/images.yaml --previous-ref "$BEFORE_SHA" --base-ref "$BEFORE_SHA" --head-ref "${{ github.sha }}")
+            repository=$(python3 scripts/image_plan.py select --family repository --manifest repository-images.yaml --previous-ref "$BEFORE_SHA" --base-ref "$BEFORE_SHA" --head-ref "${{ github.sha }}")
+            utilities=$(python3 scripts/image_plan.py select --family utility --manifest repository-images.yaml --previous-ref "$BEFORE_SHA" --base-ref "$BEFORE_SHA" --head-ref "${{ github.sha }}")
+
+            if jq -e 'index(".github/workflows/base-images.yml") or index(".dockerignore")' <<<"$changed" >/dev/null; then
+              base_images='["base-node","base-python"]'
+            else
+              jq -e 'index("Dockerfile.base-node")' <<<"$changed" >/dev/null && base_images=$(jq -c '. + ["base-node"]' <<<"$base_images")
+              jq -e 'index("Dockerfile.base-python") or index("UV_IMAGE")' <<<"$changed" >/dev/null && base_images=$(jq -c '. + ["base-python"]' <<<"$base_images")
+            fi
+            if jq -e 'index(".github/workflows/scan-base-images.yml") or index(".github/workflows/scan-images.yml") or index(".trivyignore") or index("trivy-secret.yaml")' <<<"$changed" >/dev/null; then
+              base_rescans='["base-node","base-python"]'
+              rescans=$all_entries
+            fi
+          fi
+
+          base_images=$(jq -c 'unique' <<<"$base_images")
+          base_rescans=$(jq -cn --argjson scans "$base_rescans" --argjson builds "$base_images" '$scans - $builds | unique')
+          {
+            echo "base_images=$base_images"
+            echo "base_rescans=$base_rescans"
+            echo "repackages=$repackages"
+            echo "repository=$repository"
+            echo "utilities=$utilities"
+            echo "rescans=$rescans"
+          } >> "$GITHUB_OUTPUT"
+
+  base-images:
+    needs: changes
+    if: needs.changes.outputs.base_images != '[]'
+    uses: ./.github/workflows/base-images.yml
+    with:
+      image_identifiers: ${{ needs.changes.outputs.base_images }}
+    secrets: inherit
+
+  base-image-rescans:
+    needs: changes
+    if: needs.changes.outputs.base_rescans != '[]'
+    uses: ./.github/workflows/scan-base-images.yml
+    with:
+      image_identifiers: ${{ needs.changes.outputs.base_rescans }}
+
+  repackages:
+    needs: [changes, base-images]
+    if: always() && needs.changes.result == 'success' && needs.changes.outputs.repackages != '[]' && (needs.base-images.result == 'success' || needs.base-images.result == 'skipped')
+    uses: ./.github/workflows/publish-image.yml
+    with:
+      family: repackage
+      images_json: ${{ needs.changes.outputs.repackages }}
+    secrets: inherit
+
+  repository-images:
+    needs: changes
+    if: needs.changes.outputs.repository != '[]'
+    uses: ./.github/workflows/publish-image.yml
+    with:
+      family: repository
+      images_json: ${{ needs.changes.outputs.repository }}
+    secrets: inherit
+
+  utilities:
+    needs: changes
+    if: needs.changes.outputs.utilities != '[]'
+    uses: ./.github/workflows/publish-image.yml
+    with:
+      family: utility
+      images_json: ${{ needs.changes.outputs.utilities }}
+    secrets: inherit
+
+  image-rescans:
+    needs: [changes, repackages, repository-images, utilities]
+    if: always() && needs.changes.result == 'success' && needs.changes.outputs.rescans != '[]'
+    uses: ./.github/workflows/scan-images.yml
+    with:
+      images_json: ${{ needs.changes.outputs.rescans }}

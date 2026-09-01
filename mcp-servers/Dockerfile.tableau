@@ -1,4 +1,5 @@
-FROM node:22-alpine AS builder
+ARG NODE_IMAGE=node:alpine
+FROM ${NODE_IMAGE} AS builder
 WORKDIR /app
 
 # Install git for cloning
@@ -13,7 +14,7 @@ RUN git clone ${TABLEAU_MCP_REPO} . && \
 RUN npm ci --ignore-scripts
 RUN npm run build
 
-FROM node:22-alpine AS runner
+FROM ${NODE_IMAGE} AS runner
 WORKDIR /app
 
 COPY --from=builder /app/package.json /app/package-lock.json ./

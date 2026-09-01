@@ -2,18 +2,13 @@ name: Build and Push Base Images
 
 on:
   workflow_call:
-  workflow_dispatch:
-  push:
-    branches:
-      - main
-    tags:
-      - "v*"
-    paths:
-      - .github/workflows/base-images.yml
-      - .trivyignore
-      - trivy-secret.yaml
-      - Dockerfile.base-python
-      - Dockerfile.base-node
+    inputs:
+      image_identifiers:
+        # The publisher passes only language families whose Dockerfiles changed.
+        description: JSON array of base image identifiers to publish
+        required: false
+        type: string
+        default: '["base-python","base-node"]'
 jobs:
   docker-build:
     permissions:
@@ -24,9 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image-identifier:
-          - base-python
-          - base-node
+        image-identifier: ${{ fromJson(inputs.image_identifiers || '["base-python","base-node"]') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -41,6 +34,12 @@ jobs:
         uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+      - name: Configure Python parent image
+        if: matrix.image-identifier == 'base-python'
+        id: parents
+        run: |
+          uv_image=$(cat UV_IMAGE)
+          echo "build-args=UV_IMAGE=${uv_image}" >> "$GITHUB_OUTPUT"
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         id: build-and-push
@@ -50,6 +49,7 @@ jobs:
           pull: true
           file: Dockerfile.${{ matrix.image-identifier }}
           platforms: linux/amd64,linux/arm64
+          build-args: ${{ steps.parents.outputs.build-args }}
           tags: |
             ghcr.io/${{ github.repository }}/${{ matrix.image-identifier }}:${{ github.ref_name }}
       - name: Install Cosign
@@ -63,12 +63,6 @@ jobs:
           DIGEST: ${{ steps.build-and-push.outputs.digest }}
           IMAGE: ghcr.io/${{ github.repository }}/${{ matrix.image-identifier }}:${{ github.ref_name }}
         run: cosign sign --yes "${IMAGE}@${DIGEST}"
-      - name: Setup crane
-        uses: imjasonh/setup-crane@v0.4
-      - name: Copy image to latest tag
-        if: ${{ github.ref_type == 'tag' && !contains(github.ref_name, '-rc') }}
-        run: |
-          crane tag ghcr.io/${{ github.repository }}/${{ matrix.image-identifier }}:${{ github.ref_name }} latest
 
   trivy-scan:
     permissions:
@@ -76,25 +70,6 @@ jobs:
       packages: read
       security-events: write
     needs: docker-build
-    strategy:
-      fail-fast: false
-      matrix:
-        image-identifier:
-          - base-python
-          - base-node
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Run Trivy
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: ghcr.io/${{ github.repository }}/${{ matrix.image-identifier }}:${{ github.ref_name }}
-          skip-dirs: "**/venv"
-          format: "sarif"
-          output: "trivy-results-${{ matrix.image-identifier }}.sarif"
-      - name: Upload SARIF file
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: trivy-results-${{ matrix.image-identifier }}.sarif
+    uses: ./.github/workflows/scan-base-images.yml
+    with:
+      image_identifiers: ${{ inputs.image_identifiers }}

@@ -1,0 +1,37 @@
+name: Scan Base Images
+
+on:
+  workflow_call:
+    inputs:
+      image_identifiers:
+        description: JSON array of existing base image identifiers to scan
+        required: true
+        type: string
+
+jobs:
+  trivy-scan:
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image-identifier: ${{ fromJson(inputs.image_identifiers) }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/${{ github.repository }}/${{ matrix.image-identifier }}:${{ github.ref_name }}
+          skip-dirs: "**/venv"
+          format: "sarif"
+          output: "trivy-results-${{ matrix.image-identifier }}.sarif"
+
+      - name: Upload SARIF file
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results-${{ matrix.image-identifier }}.sarif

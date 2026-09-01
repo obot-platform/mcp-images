@@ -1,0 +1,185 @@
+name: Publish Image Family
+
+on:
+  workflow_call:
+    inputs:
+      family:
+        description: Image family to select from the manifests
+        required: true
+        type: string
+      images_json:
+        description: JSON matrix of affected images in this family
+        required: true
+        type: string
+
+jobs:
+  publish:
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(inputs.images_json) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: imjasonh/setup-crane@v0.4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create image plan
+        id: plan
+        env:
+          FAMILY: ${{ matrix.family }}
+          IMAGE_JSON: ${{ toJson(matrix.image) }}
+          REGISTRY_PREFIX: ghcr.io/${{ github.repository }}
+        run: |
+          plan=$(python3 scripts/image_plan.py plan \
+            --family "$FAMILY" \
+            --image-json "$IMAGE_JSON" \
+            --registry-prefix "$REGISTRY_PREFIX" \
+            --ref-name "${{ github.ref_name }}" \
+            --ref-type "${{ github.ref_type }}" \
+            --source-revision "${{ github.sha }}")
+          # Preserve false values: jq's // operator treats false like a missing value.
+          for field in build immutable latest catalog application_base revision tag repository version name application_repository application_tag wrapper_image final_dockerfile; do
+            value=$(jq -r --arg field "$field" 'if has($field) and .[$field] != null then .[$field] else empty end' <<<"$plan")
+            echo "$field=$value" >> "$GITHUB_OUTPUT"
+          done
+          {
+            echo "build-args<<EOF"
+            jq -r '.build_args | to_entries[] | "\(.key)=\(.value)"' <<<"$plan"
+            echo "EOF"
+            echo "application-build-args<<EOF"
+            jq -r '.application_build_args // {} | to_entries[] | "\(.key)=\(.value)"' <<<"$plan"
+            echo "EOF"
+            echo "tags<<EOF"
+            jq -r '.tags[]' <<<"$plan"
+            echo "EOF"
+            echo "labels<<EOF"
+            jq -r '.labels | to_entries[] | "\(.key)=\(.value)"' <<<"$plan"
+            echo "EOF"
+            echo "dockerfile=$(jq -r '.dockerfile' <<<"$plan")"
+            echo "catalog_payload=$(jq -c '.catalog_payload' <<<"$plan")"
+          } >> "$GITHUB_OUTPUT"
+          jq . <<<"$plan"
+
+      - name: Refuse immutable tag races
+        if: steps.plan.outputs.build == 'true' && steps.plan.outputs.immutable == 'true'
+        env:
+          REFERENCE: ${{ steps.plan.outputs.repository }}:${{ steps.plan.outputs.tag }}
+        run: |
+          status=0
+          crane manifest "$REFERENCE" >/dev/null 2>manifest-error.txt || status=$?
+          if [ "$status" -eq 0 ]; then
+            echo "Immutable tag already exists: $REFERENCE" >&2
+            exit 1
+          fi
+          if ! grep -Eq 'MANIFEST_UNKNOWN|NAME_UNKNOWN' manifest-error.txt; then
+            echo "Could not verify that immutable tag is absent: $REFERENCE" >&2
+            cat manifest-error.txt >&2
+            exit "$status"
+          fi
+
+      - name: Build and push image
+        if: steps.plan.outputs.build == 'true' && steps.plan.outputs.application_base == 'false'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          pull: true
+          file: ${{ steps.plan.outputs.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          build-args: ${{ steps.plan.outputs.build-args }}
+          tags: ${{ steps.plan.outputs.tags }}
+          labels: ${{ steps.plan.outputs.labels }}
+
+      - name: Build and push mutable application base
+        if: steps.plan.outputs.build == 'true' && steps.plan.outputs.application_base == 'true'
+        id: application-base
+        uses: docker/build-push-action@v6
+        with:
+          # This internal artifact intentionally follows the application version;
+          # only the wrapped image receives immutable obot revision tags.
+          context: .
+          push: true
+          pull: true
+          file: ${{ steps.plan.outputs.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          build-args: ${{ steps.plan.outputs.application-build-args }}
+          tags: ${{ steps.plan.outputs.application_repository }}:${{ steps.plan.outputs.application_tag }}
+
+      - name: Build and push wrapped application
+        if: steps.plan.outputs.build == 'true' && steps.plan.outputs.application_base == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          pull: true
+          file: ${{ steps.plan.outputs.final_dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          # Pin the mutable intermediate by the digest returned by its build.
+          build-args: |
+            BASE_IMAGE=${{ steps.plan.outputs.application_repository }}@${{ steps.application-base.outputs.digest }}
+            MMMCP_IMAGE=${{ steps.plan.outputs.wrapper_image }}
+          tags: ${{ steps.plan.outputs.tags }}
+          labels: ${{ steps.plan.outputs.labels }}
+
+      - name: Update latest utility release
+        if: steps.plan.outputs.latest == 'true'
+        run: crane tag "${{ steps.plan.outputs.repository }}:${{ steps.plan.outputs.tag }}" latest
+
+      - name: Read published digest
+        id: published
+        run: |
+          digest=$(crane digest "${{ steps.plan.outputs.repository }}:${{ steps.plan.outputs.tag }}")
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - uses: sigstore/cosign-installer@v4.1.1
+        with:
+          cosign-release: "v3.0.5"
+
+      - name: Sign image
+        run: cosign sign --yes "${{ steps.plan.outputs.repository }}@${{ steps.published.outputs.digest }}"
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0.24.0
+        with:
+          image: ${{ steps.plan.outputs.repository }}:${{ steps.plan.outputs.tag }}
+          artifact-name: sbom-${{ steps.plan.outputs.name }}-${{ steps.plan.outputs.tag }}.spdx.json
+          dependency-snapshot: false
+          upload-artifact-retention: 30
+
+      - name: Run Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.plan.outputs.repository }}:${{ steps.plan.outputs.tag }}
+          skip-dirs: "**/venv"
+          format: "sarif"
+          output: trivy-results-${{ steps.plan.outputs.name }}-${{ steps.plan.outputs.tag }}.sarif
+
+      - name: Upload SARIF file
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          category: trivy-${{ steps.plan.outputs.name }}-${{ steps.plan.outputs.tag }}
+          sarif_file: trivy-results-${{ steps.plan.outputs.name }}-${{ steps.plan.outputs.tag }}.sarif
+
+      - name: Trigger catalog update
+        if: steps.plan.outputs.catalog == 'true' && (steps.plan.outputs.build == 'true' || github.run_attempt > 1)
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.DISPATCH_PAT }}
+          repository: obot-platform/mcp-catalog
+          event-type: update-image-tag
+          client-payload: ${{ steps.plan.outputs.catalog_payload }}
