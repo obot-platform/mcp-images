@@ -14,7 +14,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-      actions: read
       id-token: write
     strategy:
       fail-fast: false
