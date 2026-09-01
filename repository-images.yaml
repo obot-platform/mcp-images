@@ -31,6 +31,3 @@ images:
   - name: stdio-wrapper
     group: stdio-wrapper
     dockerfile: Dockerfile.stdio-wrapper
-    parents:
-      - arg: UV_IMAGE
-        image: ghcr.io/astral-sh/uv:0.12.5

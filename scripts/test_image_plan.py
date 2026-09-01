@@ -133,6 +133,13 @@ images:
         self.assertEqual(
             self.names(version_config), ["node-a", "node-b", "python-a"]
         )
+        uv_config = image_plan.select_affected(
+            "repackage",
+            self.repackages,
+            self.repackages,
+            {"UV_IMAGE"},
+        )
+        self.assertEqual(self.names(uv_config), ["python-a"])
 
     def test_type_dockerfile_selects_that_type(self):
         selected = image_plan.select_affected(
@@ -189,6 +196,10 @@ images:
             (root / "Dockerfile.tableau").write_text(
                 "FROM node:22\n", encoding="utf-8"
             )
+            (root / "Dockerfile.stdio").write_text(
+                "ARG UV_IMAGE=uv:latest\nFROM ${UV_IMAGE}\n",
+                encoding="utf-8",
+            )
             entries = [
                 entry("repository", "github", dockerfile="Dockerfile.github"),
                 entry("repository", "tableau", dockerfile="Dockerfile.tableau"),
@@ -207,6 +218,17 @@ images:
                 root=root,
             )
             self.assertEqual(self.names(selected), ["github"])
+            utilities = [
+                entry("utility", "stdio", dockerfile="Dockerfile.stdio"),
+            ]
+            selected = image_plan.select_affected(
+                "utility",
+                utilities,
+                utilities,
+                {"UV_IMAGE"},
+                root=root,
+            )
+            self.assertEqual(self.names(selected), ["stdio"])
         with self.assertRaisesRegex(image_plan.ImagePlanError, "unsupported"):
             image_plan.select_dependency(
                 Path("."), "repackage", self.repackages, "unknown"
@@ -266,10 +288,18 @@ class PlanTests(unittest.TestCase):
         (self.root / "MMMCP_IMAGE").write_text(
             "ghcr.io/obot-platform/mmmcp:v0.1.1\n", encoding="utf-8"
         )
+        (self.root / "UV_IMAGE").write_text(
+            "ghcr.io/astral-sh/uv:0.12.5\n", encoding="utf-8"
+        )
         (self.root / "Dockerfile.mmmcp").write_text(
             "ARG MMMCP_IMAGE=example/wrapper:latest\n", encoding="utf-8"
         )
         (self.root / "Dockerfile.utility").write_text("FROM scratch\n", encoding="utf-8")
+        (self.root / "Dockerfile.stdio").write_text(
+            "ARG UV_IMAGE=uv:latest\nARG MMMCP_IMAGE=mmmcp:latest\n"
+            "FROM ${MMMCP_IMAGE}\n",
+            encoding="utf-8",
+        )
         (self.root / "mcp-servers").mkdir()
         (self.root / "mcp-servers" / "Dockerfile.tableau").write_text(
             "FROM node:22\n", encoding="utf-8"
@@ -364,6 +394,21 @@ class PlanTests(unittest.TestCase):
             pin.call_args_list,
             [mock.call("github:v1")],
         )
+
+    @mock.patch("image_plan.pinned_reference")
+    def test_utility_uses_canonical_configured_parents(self, pin):
+        result = image_plan.repository_adapter(
+            self.root,
+            {"name": "stdio", "dockerfile": "Dockerfile.stdio"},
+        )
+        self.assertEqual(
+            result["build_args"],
+            {
+                "MMMCP_IMAGE": "ghcr.io/obot-platform/mmmcp:v0.1.1",
+                "UV_IMAGE": "ghcr.io/astral-sh/uv:0.12.5",
+            },
+        )
+        pin.assert_not_called()
 
     @mock.patch("image_plan.image_labels", return_value=None)
     def test_unversioned_release_behavior_is_preserved(self, _exists):

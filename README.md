@@ -63,6 +63,8 @@ directly. The root `MMMCP_IMAGE` file is the single source for the complete
 MMMCP image reference used by CI. The planner passes that reference to every
 MMMCP consumer without resolving it to a digest. Their Dockerfiles default to
 `mmmcp:latest` for direct builds.
+The root `UV_IMAGE` file works the same way for the shared Python base and STDIO
+wrapper; both Dockerfiles default to `uv:latest`.
 Repository-image parent versions are similarly defined in
 `repository-images.yaml`; their Dockerfile arguments use moving defaults such
 as `latest` or `node:alpine` and CI overrides them with digest-pinned manifest

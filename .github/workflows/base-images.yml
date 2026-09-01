@@ -34,19 +34,12 @@ jobs:
         uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      - name: Setup crane
-        if: matrix.image-identifier == 'base-python'
-        uses: imjasonh/setup-crane@v0.4
-      - name: Resolve Python parent image
+      - name: Configure Python parent image
         if: matrix.image-identifier == 'base-python'
         id: parents
         run: |
-          uv_digest=$(crane digest ghcr.io/astral-sh/uv:0.12.5)
-          {
-            echo "build-args<<EOF"
-            echo "UV_IMAGE=ghcr.io/astral-sh/uv:0.12.5@${uv_digest}"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+          uv_image=$(cat UV_IMAGE)
+          echo "build-args=UV_IMAGE=${uv_image}" >> "$GITHUB_OUTPUT"
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         id: build-and-push

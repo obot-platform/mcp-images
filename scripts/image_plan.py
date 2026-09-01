@@ -104,14 +104,14 @@ def _string_list(image: dict[str, Any], field: str) -> list[str]:
     return values
 
 
-def _mmmcp_reference(root: Path) -> str:
-    reference = (root / "MMMCP_IMAGE").read_text(encoding="utf-8").strip()
-    return _nonempty_string(reference, "MMMCP_IMAGE")
+def _configured_image(root: Path, argument: str) -> str:
+    reference = (root / argument).read_text(encoding="utf-8").strip()
+    return _nonempty_string(reference, argument)
 
 
-def _uses_mmmcp(root: Path, dockerfile: str) -> bool:
+def _uses_build_arg(root: Path, dockerfile: str, argument: str) -> bool:
     contents = (root / _relative_path(dockerfile, "dockerfile")).read_text(encoding="utf-8")
-    return bool(re.search(r"^ARG\s+MMMCP_IMAGE=", contents, re.MULTILINE))
+    return bool(re.search(rf"^ARG\s+{re.escape(argument)}=", contents, re.MULTILINE))
 
 
 def repackage_adapter(root: Path, image: dict[str, Any], registry_prefix: str) -> dict[str, Any]:
@@ -127,7 +127,7 @@ def repackage_adapter(root: Path, image: dict[str, Any], registry_prefix: str) -
     overrides = _string_list(image, "overrides")
     if image_type in ("node", "python"):
         base = pinned_reference(f"{registry_prefix}/base-{image_type}:main")
-        wrapper = _mmmcp_reference(root)
+        wrapper = _configured_image(root, "MMMCP_IMAGE")
         build_args = {"MCP_PACKAGE": package, "MCP_VERSION": version, "BASE_IMAGE": base, "MMMCP_IMAGE": wrapper}
         if image_type == "python":
             build_args.update({"MCP_CONSTRAINTS": " ".join(constraints), "MCP_OVERRIDES": " ".join(overrides)})
@@ -162,8 +162,9 @@ def repository_adapter(root: Path, image: dict[str, Any]) -> dict[str, Any]:
         if argument in build_args:
             raise ImagePlanError("image parents contains duplicate build args")
         build_args[argument] = pinned_reference(reference)
-    if _uses_mmmcp(root, dockerfile):
-        build_args["MMMCP_IMAGE"] = _mmmcp_reference(root)
+    for argument in ("MMMCP_IMAGE", "UV_IMAGE"):
+        if _uses_build_arg(root, dockerfile, argument):
+            build_args[argument] = _configured_image(root, argument)
     if "sources" in image:
         raise ImagePlanError("image sources are not supported")
     version = image.get("version")
@@ -295,7 +296,7 @@ def select_dependency(root: Path, family: str, entries: list[dict[str, Any]], de
     return [
         entry
         for entry in entries
-        if _uses_mmmcp(root, entry["image"]["dockerfile"])
+        if _uses_build_arg(root, entry["image"]["dockerfile"], "MMMCP_IMAGE")
     ]
 
 
@@ -314,7 +315,7 @@ def select_affected(family: str, entries: list[dict[str, Any]], previous_entries
     if family == "repackage":
         types: set[str] = {"node", "python", "docker"} if changed_paths & common else set()
         if changed_paths & {"Dockerfile.base-node", "repackaging/Dockerfile.mcp-node"}: types.add("node")
-        if changed_paths & {"Dockerfile.base-python", "repackaging/Dockerfile.mcp-python"}: types.add("python")
+        if changed_paths & {"Dockerfile.base-python", "repackaging/Dockerfile.mcp-python", "UV_IMAGE"}: types.add("python")
         if changed_paths & {
             ".github/workflows/base-images.yml",
             "Dockerfile.mmmcp",
@@ -332,7 +333,10 @@ def select_affected(family: str, entries: list[dict[str, Any]], previous_entries
             owned = {image.get("dockerfile"), *image.get("paths", [])}
             if changed_paths & {path for path in owned if isinstance(path, str)} or (
                 "MMMCP_IMAGE" in changed_paths
-                and _uses_mmmcp(root, image["dockerfile"])
+                and _uses_build_arg(root, image["dockerfile"], "MMMCP_IMAGE")
+            ) or (
+                "UV_IMAGE" in changed_paths
+                and _uses_build_arg(root, image["dockerfile"], "UV_IMAGE")
             ):
                 selected.add(name)
     return [entry for entry in entries if entry["image"]["name"] in selected]
