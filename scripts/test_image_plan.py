@@ -150,6 +150,17 @@ images:
         )
         self.assertEqual(self.names(selected), ["docker-a"])
 
+    def test_custom_repackage_dockerfile_selects_only_its_image(self):
+        entries = [
+            *self.repackages,
+            entry("repackage", "browser", type="docker", package="browser",
+                  version="1", dockerfile="repackaging/Dockerfile.browser"),
+        ]
+        selected = image_plan.select_affected(
+            "repackage", entries, entries, {"repackaging/Dockerfile.browser"}
+        )
+        self.assertEqual(self.names(selected), ["browser"])
+
     def test_manual_target_selects_one_and_rejects_unknown(self):
         selected = image_plan.select_affected(
             "repackage", self.repackages, [], set(), "python-a"
@@ -311,6 +322,47 @@ class PlanTests(unittest.TestCase):
 
     def tearDown(self):
         self.tempdir.cleanup()
+
+    @mock.patch("image_plan.resolve_revision", return_value={"revision": 1, "tag": "1-obot1"})
+    @mock.patch("image_plan.pinned_reference", return_value="base@sha256:aaa")
+    def test_npm_overrides_reach_application_build(self, _pin, _revision):
+        result = image_plan.plan_image(
+            self.root, "repackage",
+            {"name": "browser", "type": "node", "package": "@example/browser",
+             "version": "1", "npm_overrides": {"undici": "6.28.1"}},
+            "ghcr.io/org/repo", "main", "branch", "sha",
+        )
+        self.assertEqual(
+            result["application_build_args"]["MCP_NPM_OVERRIDES"],
+            '{"undici":"6.28.1"}',
+        )
+
+    def test_invalid_npm_overrides_are_rejected(self):
+        for image_type, overrides in [
+            ("node", []), ("node", {"undici": 6}), ("node", {"": "6.28.1"}),
+            ("node", {"undici": ""}), ("python", {"undici": "6.28.1"}),
+        ]:
+            with self.subTest(image_type=image_type, overrides=overrides):
+                with self.assertRaisesRegex(image_plan.ImagePlanError, "npm_overrides"):
+                    image_plan.repackage_adapter(
+                        self.root,
+                        {"name": "example", "type": image_type, "package": "pkg",
+                         "version": "1", "npm_overrides": overrides},
+                        "ghcr.io/org/repo",
+                    )
+
+    @mock.patch("image_plan.pinned_reference", return_value="browser@sha256:aaa")
+    def test_custom_docker_repackage_preserves_pinned_parent(self, pin):
+        image = {"name": "browser", "type": "docker", "package": "vendor/browser",
+                 "version": "1", "dockerfile": "repackaging/Dockerfile.browser"}
+        result = image_plan.repackage_adapter(self.root, image, "ghcr.io/org/repo")
+        self.assertEqual(result["dockerfile"], image["dockerfile"])
+        self.assertEqual(result["build_args"], {"BASE_IMAGE": "browser@sha256:aaa"})
+        self.assertFalse(result["application_base"])
+        pin.assert_called_once_with("vendor/browser:1")
+        image["dockerfile"] = "../Dockerfile"
+        with self.assertRaisesRegex(image_plan.ImagePlanError, "within the repository"):
+            image_plan.repackage_adapter(self.root, image, "ghcr.io/org/repo")
 
     @mock.patch("image_plan.resolve_revision")
     @mock.patch("image_plan.pinned_reference")

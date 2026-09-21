@@ -5,21 +5,27 @@ WORKDIR /app
 # Install git for cloning
 RUN apk add --no-cache git
 
-# Clone Tableau MCP v4.7.1 at a specific commit for reproducibility
+# Clone Tableau MCP v4.8.1 at a specific commit for reproducibility
 ARG TABLEAU_MCP_REPO=https://github.com/tableau/tableau-mcp.git
-ARG TABLEAU_MCP_COMMIT=aa5e8ba8c543e3f2a71b051055fab9bf58484c14
+ARG TABLEAU_MCP_COMMIT=368c740e6ff9b759128fcb4a79b9a7927ebdb28c
 RUN git clone ${TABLEAU_MCP_REPO} . && \
     git checkout ${TABLEAU_MCP_COMMIT}
 
-RUN npm ci --ignore-scripts
+# Refresh affected transitive dependencies within upstream's compatible ranges.
+# The resulting lockfile is also used by the production stage below.
+RUN npm update --ignore-scripts \
+    axios body-parser fast-uri hono @hono/node-server ip-address qs @xmldom/xmldom
 RUN npm run build
 
 FROM ${NODE_IMAGE} AS runner
 WORKDIR /app
 
 COPY --from=builder /app/package.json /app/package-lock.json ./
-RUN npm ci --omit=dev --production --ignore-scripts && \
-    npm cache clean --force
+RUN apk upgrade --no-cache && \
+    npm ci --omit=dev --ignore-scripts && \
+    npm cache clean --force && \
+    rm -rf /usr/local/lib/node_modules/npm /opt/yarn-* && \
+    rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/yarn /usr/local/bin/yarnpkg
 
 COPY --from=builder /app/build ./build
 

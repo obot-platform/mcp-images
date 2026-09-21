@@ -11,7 +11,8 @@ USER 1000
 # Install the MCP package using uv with optional extra requirements and
 # dependency overrides. Overrides let us patch vulnerable transitive pins while
 # keeping the upstream package version stable.
-RUN set -- uv tool install "${MCP_PACKAGE}@${MCP_VERSION}"; \
+RUN set -eu; \
+    set -- uv tool install "${MCP_PACKAGE}@${MCP_VERSION}"; \
     for constraint in $MCP_CONSTRAINTS; do \
         set -- "$@" --with "$constraint"; \
     done; \
@@ -23,4 +24,5 @@ RUN set -- uv tool install "${MCP_PACKAGE}@${MCP_VERSION}"; \
         set -- "$@" --overrides "$overrides_file"; \
     fi; \
     "$@"; \
-    if [ -n "${overrides_file:-}" ]; then rm -f "$overrides_file"; fi
+    if [ -n "${overrides_file:-}" ]; then rm -f "$overrides_file"; fi; \
+    uv cache clean
