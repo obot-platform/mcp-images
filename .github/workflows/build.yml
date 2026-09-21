@@ -21,7 +21,7 @@ jobs:
         run: python3 -m unittest discover -s scripts -p 'test_*.py' -v
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Validate Dockerfiles
         run: |
@@ -38,7 +38,7 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - uses: imjasonh/setup-crane@v0.4
+      - uses: imjasonh/setup-crane@v0.7
 
       - name: Install image planner dependencies
         run: python3 -m pip install --disable-pip-version-check --requirement scripts/image-requirements.txt
