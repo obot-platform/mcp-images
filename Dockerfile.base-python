@@ -6,7 +6,8 @@ FROM cgr.dev/chainguard/wolfi-base:latest
 
 USER root
 
-RUN apk add --no-cache make git python3
+RUN apk upgrade --no-cache && \
+    apk add --no-cache make git python3
 
 # Copy a pinned uv binary without installing pip and its vendored dependencies.
 COPY --from=uv-bin /uv /uvx /usr/local/bin/

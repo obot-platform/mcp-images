@@ -11,7 +11,7 @@ images:
   - name: tableau
     group: mcp-server
     catalog: true
-    version: "4.0.5"
+    version: "4.8.1"
     dockerfile: mcp-servers/Dockerfile.tableau
     parents:
       - arg: NODE_IMAGE
@@ -26,7 +26,7 @@ images:
       - http-webhook-mcp-converter/server.js
     parents:
       - arg: NODE_IMAGE
-        image: node:20-alpine
+        image: node:24-alpine
 
   - name: stdio-wrapper
     group: stdio-wrapper

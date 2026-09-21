@@ -1,0 +1,13 @@
+ARG BASE_IMAGE=mcr.microsoft.com/playwright/mcp:latest
+FROM ${BASE_IMAGE}
+
+USER root
+
+# Apply available Debian security updates. Playwright starts directly with Node,
+# so npm and Yarn (and their vendored dependencies) are not needed at runtime.
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    rm -rf /var/lib/apt/lists/* /usr/local/lib/node_modules/npm /opt/yarn-* && \
+    rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/yarn /usr/local/bin/yarnpkg
+
+USER node

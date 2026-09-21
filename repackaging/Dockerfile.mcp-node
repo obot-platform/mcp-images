@@ -3,11 +3,19 @@ FROM ${BASE_IMAGE}
 
 ARG MCP_PACKAGE
 ARG MCP_VERSION
+ARG MCP_NPM_OVERRIDES="{}"
 
 USER root
 
 # Install the MCP package globally and clean npm cache to avoid security alerts.
-RUN npm install -g "${MCP_PACKAGE}@${MCP_VERSION}" && \
+RUN set -eu; \
+    npm install -g "${MCP_PACKAGE}@${MCP_VERSION}"; \
+    if [ "$MCP_NPM_OVERRIDES" != "{}" ]; then \
+        package_root="$(npm root -g)/${MCP_PACKAGE}"; \
+        npm pkg delete devDependencies --prefix "$package_root"; \
+        npm pkg set --json "overrides=$MCP_NPM_OVERRIDES" --prefix "$package_root"; \
+        npm install --prefix "$package_root" --omit=dev --ignore-scripts --no-audit --no-fund; \
+    fi; \
     npm cache clean --force
 
 USER 1000

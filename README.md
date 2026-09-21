@@ -16,6 +16,12 @@ Images are divided into three families:
 - **Utilities** are unversioned images configured in `repository-images.yaml`,
   such as the STDIO wrapper and HTTP webhook converter.
 
+Node repackages can specify an `npm_overrides` mapping of dependency names to
+versions when upstream dependencies need security patches. Python repackages
+use `constraints` and `overrides` lists. A repackage can also specify a
+`dockerfile` for image-specific fixes; changes to that file select its image
+for rebuilding.
+
 ## Immutable revisions
 
 Versioned images are published as `{version}-obotN`, where `N` is an

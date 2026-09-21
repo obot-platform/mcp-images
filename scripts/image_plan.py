@@ -125,16 +125,29 @@ def repackage_adapter(root: Path, image: dict[str, Any], registry_prefix: str) -
     version = _nonempty_string(image.get("version"), "version")
     constraints = _string_list(image, "constraints")
     overrides = _string_list(image, "overrides")
+    npm_overrides = image.get("npm_overrides", {})
+    if not isinstance(npm_overrides, dict) or any(
+        not isinstance(key, str) or not key or not isinstance(value, str) or not value
+        for key, value in npm_overrides.items()
+    ):
+        raise ImagePlanError("image npm_overrides must map package names to non-empty version strings")
+    if npm_overrides and image_type != "node":
+        raise ImagePlanError("image npm_overrides are only supported for node repackages")
+    dockerfile = _relative_path(
+        image.get("dockerfile", f"repackaging/Dockerfile.mcp-{image_type}"), "dockerfile"
+    )
     if image_type in ("node", "python"):
         base = pinned_reference(f"{registry_prefix}/base-{image_type}:main")
         wrapper = _configured_image(root, "MMMCP_IMAGE")
         build_args = {"MCP_PACKAGE": package, "MCP_VERSION": version, "BASE_IMAGE": base, "MMMCP_IMAGE": wrapper}
         if image_type == "python":
             build_args.update({"MCP_CONSTRAINTS": " ".join(constraints), "MCP_OVERRIDES": " ".join(overrides)})
+        elif npm_overrides:
+            build_args["MCP_NPM_OVERRIDES"] = json.dumps(npm_overrides, separators=(",", ":"))
     else:
         build_args = {"BASE_IMAGE": pinned_reference(f"{package}:{version}")}
     return {
-        "name": name, "version": version, "dockerfile": f"repackaging/Dockerfile.mcp-{image_type}",
+        "name": name, "version": version, "dockerfile": dockerfile,
         "build_args": build_args, "catalog": True,
         "application_base": image_type in ("node", "python"),
     }
@@ -325,6 +338,10 @@ def select_affected(family: str, entries: list[dict[str, Any]], previous_entries
             types.update(("node", "python"))
         if "repackaging/Dockerfile.mcp-docker" in changed_paths: types.add("docker")
         selected.update(name for name, entry in current.items() if entry["image"].get("type") in types)
+        selected.update(
+            name for name, entry in current.items()
+            if entry["image"].get("dockerfile") in changed_paths
+        )
     else:
         if changed_paths & common:
             selected.update(current)

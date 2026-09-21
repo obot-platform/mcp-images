@@ -132,6 +132,10 @@ jobs:
 
           base_images=$(jq -c 'unique' <<<"$base_images")
           base_rescans=$(jq -cn --argjson scans "$base_rescans" --argjson builds "$base_images" '$scans - $builds | unique')
+          # A build already scans its image. Uploading the same category twice
+          # in one workflow run is rejected by GitHub code scanning.
+          builds=$(jq -cn --argjson repackages "$repackages" --argjson repository "$repository" --argjson utilities "$utilities" '$repackages + $repository + $utilities')
+          rescans=$(jq -cn --argjson scans "$rescans" --argjson builds "$builds" '$scans - $builds')
           {
             echo "base_images=$base_images"
             echo "base_rescans=$base_rescans"

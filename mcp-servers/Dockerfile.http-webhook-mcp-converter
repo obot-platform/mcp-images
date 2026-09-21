@@ -1,4 +1,4 @@
-ARG NODE_IMAGE=node:alpine
+ARG NODE_IMAGE=node:24-alpine
 FROM ${NODE_IMAGE}
 
 # Set working directory
@@ -10,8 +10,13 @@ COPY http-webhook-mcp-converter/package*.json ./
 # Copy application code
 COPY http-webhook-mcp-converter/server.js ./
 
-# Install dependencies
-RUN npm install
+# Install the locked production dependencies and remove build-only package
+# managers, including their vulnerable vendored dependency trees.
+RUN apk upgrade --no-cache && \
+    npm ci --omit=dev --ignore-scripts && \
+    npm cache clean --force && \
+    rm -rf /usr/local/lib/node_modules/npm /opt/yarn-* && \
+    rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/yarn /usr/local/bin/yarnpkg
 
 # Run the server
 CMD ["node", "server.js"]
