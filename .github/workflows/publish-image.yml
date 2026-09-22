@@ -38,7 +38,7 @@ jobs:
       tags: ${{ steps.plan.outputs.tags }}
       labels: ${{ steps.plan.outputs.labels }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: imjasonh/setup-crane@v0.7
 
@@ -278,9 +278,9 @@ jobs:
           digest=$(crane digest "${{ needs.plan.outputs.repository }}:${{ needs.plan.outputs.tag }}")
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
-      - uses: sigstore/cosign-installer@v4.1.1
+      - uses: sigstore/cosign-installer@v4.1.2
         with:
-          cosign-release: "v3.0.5"
+          cosign-release: "v3.0.6"
 
       - name: Sign image
         run: cosign sign --yes "${{ needs.plan.outputs.repository }}@${{ steps.published.outputs.digest }}"

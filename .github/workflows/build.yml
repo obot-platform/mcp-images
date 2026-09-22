@@ -12,7 +12,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install image planner dependencies
         run: python3 -m pip install --disable-pip-version-check --requirement scripts/image-requirements.txt
@@ -33,7 +33,7 @@ jobs:
     name: Preview immutable image revisions
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
