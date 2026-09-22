@@ -1,34 +1,45 @@
-name: Publish Image Family
+name: Publish Image
 
 on:
   workflow_call:
     inputs:
       family:
-        description: Image family to select from the manifests
+        description: Image family from the manifests
         required: true
         type: string
-      images_json:
-        description: JSON matrix of affected images in this family
+      image_json:
+        description: JSON manifest entry for the image
         required: true
         type: string
 
 jobs:
-  publish:
+  plan:
     permissions:
       contents: read
-      packages: write
-      security-events: write
-      id-token: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJson(inputs.images_json) }}
-    runs-on: ubuntu-latest
+      packages: read
+    runs-on: ubuntu-24.04
+    outputs:
+      build: ${{ steps.plan.outputs.build }}
+      immutable: ${{ steps.plan.outputs.immutable }}
+      latest: ${{ steps.plan.outputs.latest }}
+      catalog: ${{ steps.plan.outputs.catalog }}
+      application_base: ${{ steps.plan.outputs.application_base }}
+      tag: ${{ steps.plan.outputs.tag }}
+      repository: ${{ steps.plan.outputs.repository }}
+      name: ${{ steps.plan.outputs.name }}
+      application_repository: ${{ steps.plan.outputs.application_repository }}
+      application_tag: ${{ steps.plan.outputs.application_tag }}
+      wrapper_image: ${{ steps.plan.outputs.wrapper_image }}
+      final_dockerfile: ${{ steps.plan.outputs.final_dockerfile }}
+      dockerfile: ${{ steps.plan.outputs.dockerfile }}
+      catalog_payload: ${{ steps.plan.outputs.catalog_payload }}
+      build-args: ${{ steps.plan.outputs.build-args }}
+      application-build-args: ${{ steps.plan.outputs.application-build-args }}
+      tags: ${{ steps.plan.outputs.tags }}
+      labels: ${{ steps.plan.outputs.labels }}
     steps:
       - uses: actions/checkout@v4
 
-      - uses: docker/setup-qemu-action@v4
-      - uses: docker/setup-buildx-action@v4
       - uses: imjasonh/setup-crane@v0.7
 
       - name: Log in to GitHub Container Registry
@@ -41,8 +52,8 @@ jobs:
       - name: Create image plan
         id: plan
         env:
-          FAMILY: ${{ matrix.family }}
-          IMAGE_JSON: ${{ toJson(matrix.image) }}
+          FAMILY: ${{ inputs.family }}
+          IMAGE_JSON: ${{ inputs.image_json }}
           REGISTRY_PREFIX: ghcr.io/${{ github.repository }}
         run: |
           plan=$(python3 scripts/image_plan.py plan \
@@ -75,14 +86,153 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           jq . <<<"$plan"
 
-      - name: Refuse immutable tag races
-        if: steps.plan.outputs.build == 'true' && steps.plan.outputs.immutable == 'true'
+  build:
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Publish only digests here. The publish job creates tags after both
+      # native builds succeed, using the single revision allocated by plan.
+      - name: Build and push image by digest
+        if: needs.plan.outputs.application_base == 'false'
+        id: image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          pull: true
+          file: ${{ needs.plan.outputs.dockerfile }}
+          platforms: linux/${{ matrix.arch }}
+          build-args: ${{ needs.plan.outputs.build-args }}
+          labels: ${{ needs.plan.outputs.labels }}
+          outputs: type=image,name=${{ needs.plan.outputs.repository }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Build and push application base by digest
+        if: needs.plan.outputs.application_base == 'true'
+        id: application-base
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          pull: true
+          file: ${{ needs.plan.outputs.dockerfile }}
+          platforms: linux/${{ matrix.arch }}
+          build-args: ${{ needs.plan.outputs.application-build-args }}
+          outputs: type=image,name=${{ needs.plan.outputs.application_repository }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Build and push wrapped application by digest
+        if: needs.plan.outputs.application_base == 'true'
+        id: wrapped
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          pull: true
+          file: ${{ needs.plan.outputs.final_dockerfile }}
+          platforms: linux/${{ matrix.arch }}
+          # Use this architecture's exact application base, never a moving tag.
+          build-args: |
+            BASE_IMAGE=${{ needs.plan.outputs.application_repository }}@${{ steps.application-base.outputs.digest }}
+            MMMCP_IMAGE=${{ needs.plan.outputs.wrapper_image }}
+          labels: ${{ needs.plan.outputs.labels }}
+          outputs: type=image,name=${{ needs.plan.outputs.repository }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export image digests
         env:
-          REFERENCE: ${{ steps.plan.outputs.repository }}:${{ steps.plan.outputs.tag }}
+          ARCH: ${{ matrix.arch }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest || steps.wrapped.outputs.digest }}
+          APPLICATION_DIGEST: ${{ steps.application-base.outputs.digest }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests/$ARCH"
+          printf '%s\n' "$IMAGE_DIGEST" > "$RUNNER_TEMP/digests/$ARCH/image"
+          if [ -n "$APPLICATION_DIGEST" ]; then
+            printf '%s\n' "$APPLICATION_DIGEST" > "$RUNNER_TEMP/digests/$ARCH/application"
+          fi
+
+      - name: Upload image digests
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-digests-${{ inputs.family }}-${{ needs.plan.outputs.name }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/
+          if-no-files-found: error
+          retention-days: 30
+          # Rerunning a failed architecture replaces only its own artifact.
+          overwrite: true
+
+  publish:
+    needs: [plan, build]
+    # A utility release retry can reuse an existing tag without building.
+    if: ${{ !cancelled() && needs.plan.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+      id-token: write
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: imjasonh/setup-crane@v0.7
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download AMD64 image digests
+        if: needs.plan.outputs.build == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: image-digests-${{ inputs.family }}-${{ needs.plan.outputs.name }}-amd64
+          path: ${{ runner.temp }}/digests
+
+      - name: Download ARM64 image digests
+        if: needs.plan.outputs.build == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: image-digests-${{ inputs.family }}-${{ needs.plan.outputs.name }}-arm64
+          path: ${{ runner.temp }}/digests
+
+      - name: Refuse immutable tag races
+        id: immutable
+        if: needs.plan.outputs.build == 'true' && needs.plan.outputs.immutable == 'true'
+        env:
+          REPOSITORY: ${{ needs.plan.outputs.repository }}
+          REFERENCE: ${{ needs.plan.outputs.repository }}:${{ needs.plan.outputs.tag }}
         run: |
           status=0
-          crane manifest "$REFERENCE" >/dev/null 2>manifest-error.txt || status=$?
+          crane manifest "$REFERENCE" >published-manifest.json 2>manifest-error.txt || status=$?
           if [ "$status" -eq 0 ]; then
+            # Retrying a failed signing/scanning job may find its own manifest.
+            # Reuse only the exact same contents; never overwrite another build.
+            amd64=$(cat "$RUNNER_TEMP/digests/amd64/image")
+            arm64=$(cat "$RUNNER_TEMP/digests/arm64/image")
+            docker buildx imagetools create --dry-run \
+              "$REPOSITORY@$amd64" "$REPOSITORY@$arm64" >expected-manifest.json
+            if [ "$(jq -Sc . published-manifest.json)" = "$(jq -Sc . expected-manifest.json)" ]; then
+              echo "reuse=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
             echo "Immutable tag already exists: $REFERENCE" >&2
             exit 1
           fi
@@ -92,58 +242,40 @@ jobs:
             exit "$status"
           fi
 
-      - name: Build and push image
-        if: steps.plan.outputs.build == 'true' && steps.plan.outputs.application_base == 'false'
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: true
-          pull: true
-          file: ${{ steps.plan.outputs.dockerfile }}
-          platforms: linux/amd64,linux/arm64
-          build-args: ${{ steps.plan.outputs.build-args }}
-          tags: ${{ steps.plan.outputs.tags }}
-          labels: ${{ steps.plan.outputs.labels }}
+      - name: Publish application base manifest
+        if: needs.plan.outputs.build == 'true' && needs.plan.outputs.application_base == 'true'
+        env:
+          REPOSITORY: ${{ needs.plan.outputs.application_repository }}
+          TAG: ${{ needs.plan.outputs.application_tag }}
+        run: |
+          amd64=$(cat "$RUNNER_TEMP/digests/amd64/application")
+          arm64=$(cat "$RUNNER_TEMP/digests/arm64/application")
+          docker buildx imagetools create --tag "$REPOSITORY:$TAG" \
+            "$REPOSITORY@$amd64" "$REPOSITORY@$arm64"
 
-      - name: Build and push mutable application base
-        if: steps.plan.outputs.build == 'true' && steps.plan.outputs.application_base == 'true'
-        id: application-base
-        uses: docker/build-push-action@v7
-        with:
-          # This internal artifact intentionally follows the application version;
-          # only the wrapped image receives immutable obot revision tags.
-          context: .
-          push: true
-          pull: true
-          file: ${{ steps.plan.outputs.dockerfile }}
-          platforms: linux/amd64,linux/arm64
-          build-args: ${{ steps.plan.outputs.application-build-args }}
-          tags: ${{ steps.plan.outputs.application_repository }}:${{ steps.plan.outputs.application_tag }}
-
-      - name: Build and push wrapped application
-        if: steps.plan.outputs.build == 'true' && steps.plan.outputs.application_base == 'true'
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: true
-          pull: true
-          file: ${{ steps.plan.outputs.final_dockerfile }}
-          platforms: linux/amd64,linux/arm64
-          # Pin the mutable intermediate by the digest returned by its build.
-          build-args: |
-            BASE_IMAGE=${{ steps.plan.outputs.application_repository }}@${{ steps.application-base.outputs.digest }}
-            MMMCP_IMAGE=${{ steps.plan.outputs.wrapper_image }}
-          tags: ${{ steps.plan.outputs.tags }}
-          labels: ${{ steps.plan.outputs.labels }}
+      - name: Publish image manifest
+        if: needs.plan.outputs.build == 'true' && steps.immutable.outputs.reuse != 'true'
+        env:
+          REPOSITORY: ${{ needs.plan.outputs.repository }}
+          TAGS: ${{ needs.plan.outputs.tags }}
+        run: |
+          amd64=$(cat "$RUNNER_TEMP/digests/amd64/image")
+          arm64=$(cat "$RUNNER_TEMP/digests/arm64/image")
+          tag_args=()
+          while IFS= read -r tag; do
+            tag_args+=(--tag "$tag")
+          done <<<"$TAGS"
+          docker buildx imagetools create "${tag_args[@]}" \
+            "$REPOSITORY@$amd64" "$REPOSITORY@$arm64"
 
       - name: Update latest utility release
-        if: steps.plan.outputs.latest == 'true'
-        run: crane tag "${{ steps.plan.outputs.repository }}:${{ steps.plan.outputs.tag }}" latest
+        if: needs.plan.outputs.latest == 'true'
+        run: crane tag "${{ needs.plan.outputs.repository }}:${{ needs.plan.outputs.tag }}" latest
 
       - name: Read published digest
         id: published
         run: |
-          digest=$(crane digest "${{ steps.plan.outputs.repository }}:${{ steps.plan.outputs.tag }}")
+          digest=$(crane digest "${{ needs.plan.outputs.repository }}:${{ needs.plan.outputs.tag }}")
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
       - uses: sigstore/cosign-installer@v4.1.1
@@ -151,35 +283,35 @@ jobs:
           cosign-release: "v3.0.5"
 
       - name: Sign image
-        run: cosign sign --yes "${{ steps.plan.outputs.repository }}@${{ steps.published.outputs.digest }}"
+        run: cosign sign --yes "${{ needs.plan.outputs.repository }}@${{ steps.published.outputs.digest }}"
 
       - name: Generate SBOM
         uses: anchore/sbom-action@v0.24.0
         with:
-          image: ${{ steps.plan.outputs.repository }}:${{ steps.plan.outputs.tag }}
-          artifact-name: sbom-${{ steps.plan.outputs.name }}-${{ steps.plan.outputs.tag }}.spdx.json
+          image: ${{ needs.plan.outputs.repository }}:${{ needs.plan.outputs.tag }}
+          artifact-name: sbom-${{ needs.plan.outputs.name }}-${{ needs.plan.outputs.tag }}.spdx.json
           dependency-snapshot: false
           upload-artifact-retention: 30
 
       - name: Run Trivy
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: ${{ steps.plan.outputs.repository }}:${{ steps.plan.outputs.tag }}
+          image-ref: ${{ needs.plan.outputs.repository }}:${{ needs.plan.outputs.tag }}
           skip-dirs: "**/venv"
           format: "sarif"
-          output: trivy-results-${{ steps.plan.outputs.name }}-${{ steps.plan.outputs.tag }}.sarif
+          output: trivy-results-${{ needs.plan.outputs.name }}-${{ needs.plan.outputs.tag }}.sarif
 
       - name: Upload SARIF file
         uses: github/codeql-action/upload-sarif@v3
         with:
-          category: trivy-${{ steps.plan.outputs.name }}
-          sarif_file: trivy-results-${{ steps.plan.outputs.name }}-${{ steps.plan.outputs.tag }}.sarif
+          category: trivy-${{ needs.plan.outputs.name }}
+          sarif_file: trivy-results-${{ needs.plan.outputs.name }}-${{ needs.plan.outputs.tag }}.sarif
 
       - name: Trigger catalog update
-        if: steps.plan.outputs.catalog == 'true' && (steps.plan.outputs.build == 'true' || github.run_attempt > 1)
+        if: needs.plan.outputs.catalog == 'true' && (needs.plan.outputs.build == 'true' || github.run_attempt > 1)
         uses: peter-evans/repository-dispatch@v3
         with:
           token: ${{ secrets.DISPATCH_PAT }}
           repository: obot-platform/mcp-catalog
           event-type: update-image-tag
-          client-payload: ${{ steps.plan.outputs.catalog_payload }}
+          client-payload: ${{ needs.plan.outputs.catalog_payload }}
