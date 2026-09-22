@@ -9,6 +9,18 @@ permissions:
   contents: read
 
 jobs:
+  openapi-mcp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.5"
+          python-version: "3.12"
+      - name: Test OpenAPI wrapper
+        working-directory: openapi-mcp
+        run: uv run --locked python -m unittest -v
+
   build:
     runs-on: ubuntu-latest
     steps:

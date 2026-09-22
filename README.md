@@ -16,6 +16,10 @@ Images are divided into three families:
 - **Utilities** are unversioned images configured in `repository-images.yaml`,
   such as the STDIO wrapper and HTTP webhook converter.
 
+The [OpenAPI MCP wrapper](openapi-mcp/README.md) is a versioned repository image
+that serves stored OpenAPI snapshots using FastMCP, with request-scoped
+credentials and optional tool search.
+
 Node repackages can specify an `npm_overrides` mapping of dependency names to
 versions when upstream dependencies need security patches. Python repackages
 use `constraints` and `overrides` lists. A repackage can also specify a

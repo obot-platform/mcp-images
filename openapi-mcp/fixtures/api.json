@@ -1,0 +1,39 @@
+{
+  "openapi": "3.1.2",
+  "info": {"title": "Fixture API", "version": "1"},
+  "servers": [{"url": "https://api.example.test/v1"}],
+  "paths": {
+    "/items/{id}": {
+      "get": {
+        "operationId": "getItem", "summary": "Get an item",
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "detail", "in": "query", "schema": {"type": "string"}},
+          {"name": "X-View", "in": "header", "schema": {"type": "string"}}
+        ],
+        "responses": {"200": {"description": "An item"}}
+      },
+      "delete": {
+        "operationId": "deleteItem", "summary": "Delete an item",
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"204": {"description": "Deleted"}}
+      }
+    },
+    "/items": {
+      "get": {"operationId": "listItems", "responses": {"200": {"description": "Items"}}},
+      "post": {
+        "operationId": "createItem",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "type": "object", "properties": {"title": {"type": "string"}}, "required": ["title"]
+        }}}},
+        "responses": {"200": {"description": "Created"}}
+      }
+    },
+    "/admin/status": {
+      "get": {"operationId": "adminStatus", "responses": {"200": {"description": "Status"}}}
+    },
+    "/internal": {
+      "get": {"operationId": "internalStatus", "tags": ["internal"], "responses": {"200": {"description": "Status"}}}
+    }
+  }
+}
