@@ -1,13 +1,30 @@
 ARG BASE_IMAGE=mcr.microsoft.com/playwright/mcp:latest
-FROM ${BASE_IMAGE}
+ARG RUNTIME_IMAGE=ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78
+FROM ${BASE_IMAGE} AS upstream
+FROM ${RUNTIME_IMAGE}
 
-USER root
+ENV NODE_ENV=production
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
-# Apply available Debian security updates. Playwright starts directly with Node,
-# so npm and Yarn (and their vendored dependencies) are not needed at runtime.
+WORKDIR /app
+
+# Keep the released application, Node binary, and exact dependency versions on
+# a supported distribution with newer security fixes than the upstream base.
+COPY --from=upstream /usr/local/bin/node /usr/local/bin/node
+COPY --from=upstream /usr/local/LICENSE /usr/local/LICENSE
+COPY --from=upstream --chown=1000:1000 /app/ /app/
+
+# Install Chromium and its system dependencies using the bundled Playwright
+# version, so the browser matches the application on each target architecture.
 RUN apt-get update && \
     apt-get upgrade -y && \
-    rm -rf /var/lib/apt/lists/* /usr/local/lib/node_modules/npm /opt/yarn-* && \
-    rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/yarn /usr/local/bin/yarnpkg
+    apt-get install -y --no-install-recommends ca-certificates libstdc++6 && \
+    node node_modules/playwright-core/cli.js install --with-deps --no-shell chromium && \
+    rm -rf /var/lib/apt/lists/* && \
+    usermod --login node --home /home/node --move-home --groups '' ubuntu && \
+    groupmod --new-name node ubuntu
 
 USER node
+WORKDIR /home/node
+
+ENTRYPOINT ["node", "/app/cli.js", "--headless", "--browser", "chromium", "--no-sandbox"]

@@ -9,6 +9,11 @@ COPY --from=binary /server/github-mcp-server .
 
 USER root
 
+# The release base pins OS packages in /etc/apk/world. Relax exact version pins
+# so apk can install security updates.
+RUN sed -i -E 's/^([^=<>~]+)=.*$/\1/' /etc/apk/world && \
+    apk upgrade --no-cache
+
 RUN cat > mmmcp.yaml <<'EOF'
 servers:
   - name: GitHub
