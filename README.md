@@ -31,7 +31,7 @@ the next number. A new version starts at `obot1`.
 
 For example, if `1.2.3-obot1` and `1.2.3-obot2` exist, the next build publishes
 `1.2.3-obot3`. Existing revision tags are never intentionally overwritten, and
-the workflow checks again that the selected tag is absent before building.
+the workflow checks again that the selected tag is absent before publishing.
 There is no moving `1.2.3` or `1.2.3-main` alias; catalog updates point directly
 to the immutable revision.
 
@@ -57,6 +57,21 @@ as DuckDuckGo, selects only that image.
 Pull requests use the same selector and write a read-only table of proposed
 immutable tags to the Actions job summary. The preview does not reserve those
 tags, so the final revision may change before merge.
+
+## Native image builds
+
+All image builds use native runners: `ubuntu-24.04` for AMD64 and
+`ubuntu-24.04-arm` for ARM64. Each architecture pushes its image by digest;
+after both builds succeed, the publisher combines them into a manifest and
+applies the published tags. Signing, SBOM generation, scanning, and catalog
+updates run against the combined image.
+
+Repackages, repository images, and utilities are planned once before the
+architecture jobs start, so both builds share the same revision and resolved
+parent digests. Node and Python repackages build their application base and
+MMMCP wrapper on the same native runner, with
+the wrapper pinned to that architecture's application base digest. The mutable
+application base tag is also published as a combined manifest.
 
 ## Parent images
 

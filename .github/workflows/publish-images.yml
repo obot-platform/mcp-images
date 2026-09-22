@@ -163,28 +163,40 @@ jobs:
   repackages:
     needs: [changes, base-images]
     if: always() && needs.changes.result == 'success' && needs.changes.outputs.repackages != '[]' && (needs.base-images.result == 'success' || needs.base-images.result == 'skipped')
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.changes.outputs.repackages) }}
     uses: ./.github/workflows/publish-image.yml
     with:
-      family: repackage
-      images_json: ${{ needs.changes.outputs.repackages }}
+      family: ${{ matrix.family }}
+      image_json: ${{ toJson(matrix.image) }}
     secrets: inherit
 
   repository-images:
     needs: changes
     if: needs.changes.outputs.repository != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.changes.outputs.repository) }}
     uses: ./.github/workflows/publish-image.yml
     with:
-      family: repository
-      images_json: ${{ needs.changes.outputs.repository }}
+      family: ${{ matrix.family }}
+      image_json: ${{ toJson(matrix.image) }}
     secrets: inherit
 
   utilities:
     needs: changes
     if: needs.changes.outputs.utilities != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.changes.outputs.utilities) }}
     uses: ./.github/workflows/publish-image.yml
     with:
-      family: utility
-      images_json: ${{ needs.changes.outputs.utilities }}
+      family: ${{ matrix.family }}
+      image_json: ${{ toJson(matrix.image) }}
     secrets: inherit
 
   image-rescans:
