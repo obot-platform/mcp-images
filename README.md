@@ -91,6 +91,14 @@ Repository-image parent versions are similarly defined in
 as `latest` or `node:alpine` and CI overrides them with digest-pinned manifest
 references.
 
+GitHub and STDIO wrapper builds remove inherited exact OS-package version pins
+before upgrading packages, so the pinned MMMCP release does not block security
+updates. Playwright keeps the upstream release's application and Node binary on
+a digest-pinned Ubuntu 26.04 runtime, then installs Chromium and its system
+dependencies using the bundled Playwright version. This preserves the browser
+version, non-root user, and entrypoint while applying the newer distribution's
+security fixes.
+
 ## Manual rebuilds
 
 The **Publish MCP Images** workflow can be dispatched from `main` in one of two

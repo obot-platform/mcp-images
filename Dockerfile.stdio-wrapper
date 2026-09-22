@@ -6,8 +6,11 @@ FROM ${MMMCP_IMAGE}
 
 USER root
 
-# Toolchain, Node, and Python in one layer.
-RUN apk add --no-cache make git nodejs npm pnpm python3 && \
+# The release base pins OS packages in /etc/apk/world. Relax exact version pins
+# so apk can install security updates before adding the toolchain.
+RUN sed -i -E 's/^([^=<>~]+)=.*$/\1/' /etc/apk/world && \
+    apk upgrade --no-cache && \
+    apk add --no-cache make git nodejs npm pnpm python3 && \
     npm install -g npm@12.0.2 && \
     npm_root="$(npm root -g)" && \
     npm pkg delete devDependencies --prefix "${npm_root}/npm" && \
