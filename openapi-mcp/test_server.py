@@ -93,6 +93,28 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                     await client.call_tool("createItem", {"title": "hello"})
                     self.assertEqual(json.loads(calls[-1].content), {"title": "hello"})
 
+    async def test_upstream_response_does_not_require_matching_openapi_output_schema(self):
+        spec = copy.deepcopy(SPEC)
+        spec["paths"]["/items/{id}"]["get"]["responses"]["200"]["content"] = {
+            "application/json": {"schema": {
+                "type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]
+            }}
+        }
+
+        def backend(request):
+            return response({"id": "upstream-string"})
+
+        for tool_search in (False, True):
+            with self.subTest(tool_search=tool_search):
+                document, config = prepare(spec, {"toolSearch": tool_search})
+                async with APIClient(config, transport=httpx.MockTransport(backend)) as http:
+                    async with Client(create_server(document, config, http)) as client:
+                        tool, args = (("call_tool", {"name": "getItem", "arguments": {"id": "1"}})
+                                      if tool_search else ("getItem", {"id": "1"}))
+                        result = await client.call_tool(tool, args, raise_on_error=False)
+                        self.assertFalse(result.is_error, str(result))
+                        self.assertIn("upstream-string", str(result))
+
     async def test_exclusions_all_invocation_paths(self):
         cases = [
             ([{"method": "DELETE"}, {"pathPattern": "^/admin/"}, {"tag": "internal"}],

@@ -32,6 +32,7 @@ def create_server(document, config, client):
     server = FastMCP.from_openapi(
         openapi_spec=document, client=client, name=document.get("info", {}).get("title", "OpenAPI"),
         route_maps=mappings, mcp_component_fn=isolate_headers, mask_error_details=True,
+        validate_output=False,
     )
     if config.tool_search:
         server.add_transform(BM25SearchTransform())
