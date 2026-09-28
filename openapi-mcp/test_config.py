@@ -57,7 +57,7 @@ class ConfigTests(unittest.TestCase):
     def test_bad_settings(self):
         cases = [
             {"unknown": 1}, {"toolSearch": "true"}, {"exclude": {}},
-            {"exclude": [{"method": "DELETE"}]}, {"credentialHeaders": "Authorization"},
+            {"credentialHeaders": "Authorization"},
             {"credentialHeaders": ["Host"]}, {"credentialHeaders": ["Cookie"]},
             {"credentialHeaders": ["bad\nname"]}, {"credentialHeaders": ["X-Key", "x-key"]},
         ]
@@ -68,6 +68,12 @@ class ConfigTests(unittest.TestCase):
         for settings in cases:
             with self.subTest(settings=settings), self.assertRaises(ValueError):
                 prepare(SPEC, settings)
+
+    def test_exclusions_are_preserved_without_tool_search(self):
+        rules = [{"method": "DELETE"}]
+        _, config = prepare(SPEC, {"exclude": rules})
+        self.assertFalse(config.tool_search)
+        self.assertEqual(config.exclude, tuple(rules))
 
     def test_references_auth_and_credentials_not_tool_parameters(self):
         spec = copy.deepcopy(SPEC)

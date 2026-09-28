@@ -114,8 +114,6 @@ def prepare(spec: dict, settings: dict) -> tuple[dict, Config]:
     headers = tuple(h.lower() for h in headers)
     if len(set(headers)) != len(headers):
         raise ConfigError("Duplicate credential header names")
-    if rules and not search:
-        raise ConfigError("Exclusions require toolSearch=true")
     for rule in rules:
         if (not isinstance(rule, dict) or not rule or rule.keys() - {"method", "pathPattern", "tag"}
                 or any(not isinstance(v, str) or not v.strip() for v in rule.values())):

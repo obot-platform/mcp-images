@@ -1,13 +1,14 @@
 import asyncio
 import copy
 import json
+import os
 import socket
 import subprocess
 import sys
 import tempfile
 import unittest
 from contextlib import asynccontextmanager
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from pathlib import Path
 
 import httpx
@@ -17,7 +18,7 @@ from fastmcp.client.transports import StreamableHttpTransport
 
 from config import prepare
 from network import APIClient
-from server import StartupTimeout, create_server, startup_deadline
+from server import StartupTimeout, create_error_server, create_server, serve, startup_deadline
 from test_config import SPEC
 
 
@@ -46,29 +47,99 @@ async def running_http(app):
 
 
 class ServerTests(unittest.IsolatedAsyncioTestCase):
-    def test_startup_validation_is_actionable_and_does_not_dump_document(self):
-        for settings, spec, expected in (
-            ({"exclude": [{"method": "DELETE"}]}, SPEC, "Exclusions require"),
-            ({}, {**SPEC, "info": {"title": "do-not-log-this-secret"}}, "Invalid OpenAPI"),
-        ):
-            with tempfile.TemporaryDirectory() as directory:
-                filename = Path(directory) / "openapi.json"
-                filename.write_text(json.dumps(spec), encoding="utf-8")
-                result = subprocess.run([sys.executable, str(Path(__file__).parent / "server.py")],
-                                        env={"OPENAPI_SPEC_FILE": str(filename),
-                                             "OPENAPI_CONFIG_JSON": json.dumps(settings)},
-                                        capture_output=True, text=True, timeout=10)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn(expected, result.stderr)
-            self.assertNotIn("do-not-log-this-secret", result.stderr + result.stdout)
-            self.assertNotIn("Traceback", result.stderr)
+    async def test_invalid_startup_stays_alive_and_reports_safe_errors(self):
+        cases = (
+            ({"OPENAPI_SPEC_FILE": ""}, "OPENAPI_SPEC_FILE must name a readable"),
+            ({"OPENAPI_CONFIG_JSON": '{"baseURL":"http://localhost"}'},
+             "Local destinations are prohibited"),
+            ({"OPENAPI_CONFIG_JSON": '{"baseURL":"https://do-not-log-this-secret.test",'},
+             "OPENAPI_CONFIG_JSON must contain valid JSON"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            filename = Path(directory) / "openapi.json"
+            filename.write_text(json.dumps(SPEC), encoding="utf-8")
+            invalid_filename = Path(directory) / "invalid-openapi.json"
+            invalid_filename.write_text(json.dumps({"info": {"title": "do-not-log-this-secret"}}),
+                                        encoding="utf-8")
+            cases += (({"OPENAPI_SPEC_FILE": str(invalid_filename)},
+                       "Supported OpenAPI versions"),)
+            for overrides, expected in cases:
+                with self.subTest(expected=expected):
+                    with socket.socket() as sock:
+                        sock.bind(("127.0.0.1", 0))
+                        port = sock.getsockname()[1]
+                    env = {"PORT": str(port), "OPENAPI_SPEC_FILE": str(filename),
+                           "OPENAPI_CONFIG_JSON": "{}", **overrides}
+                    process = subprocess.Popen(
+                        [sys.executable, str(Path(__file__).parent / "server.py")],
+                        env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                    )
+                    try:
+                        async with httpx.AsyncClient(trust_env=False) as http:
+                            for _ in range(100):
+                                self.assertIsNone(process.poll(), "container exited during startup")
+                                try:
+                                    live = await http.get(f"http://127.0.0.1:{port}/healthz")
+                                    break
+                                except httpx.ConnectError:
+                                    await asyncio.sleep(0.05)
+                            else:
+                                self.fail("container did not start HTTP")
+                            self.assertEqual(live.status_code, 200)
+                            ready = await http.get(f"http://127.0.0.1:{port}/readyz")
+                            self.assertEqual(ready.status_code, 503)
+                            self.assertIn(expected, ready.text)
+                            initialize = await http.post(
+                                f"http://127.0.0.1:{port}/mcp",
+                                headers={"accept": "application/json, text/event-stream"},
+                                json={"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                                      "params": {"protocolVersion": "2025-03-26", "capabilities": {},
+                                                 "clientInfo": {"name": "test", "version": "1"}}},
+                            )
+                            self.assertIn(expected, initialize.text)
+                            self.assertIn('"code":-32000', initialize.text)
+                            for method, params in (("tools/list", {}),
+                                                   ("tools/call", {"name": "getItem", "arguments": {"id": "1"}})):
+                                denied = await http.post(
+                                    f"http://127.0.0.1:{port}/mcp",
+                                    headers={"accept": "application/json, text/event-stream"},
+                                    json={"jsonrpc": "2.0", "id": 2, "method": method,
+                                          "params": params},
+                                )
+                                self.assertIn(expected, denied.text)
+                                self.assertNotIn("getItem", denied.text)
+                            self.assertIsNone(process.poll())
+                    finally:
+                        process.terminate()
+                        stdout, stderr = process.communicate(timeout=5)
+                    self.assertIn(expected, stderr)
+                    self.assertNotIn("do-not-log-this-secret", stdout + stderr + ready.text + initialize.text)
+                    self.assertNotIn("Traceback", stderr)
 
-    def test_startup_requires_schema_file(self):
-        result = subprocess.run([sys.executable, str(Path(__file__).parent / "server.py")],
-                                env={}, capture_output=True, text=True, timeout=10)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("OPENAPI_SPEC_FILE must name a readable", result.stderr)
-        self.assertNotIn("Traceback", result.stderr)
+    async def test_conversion_failures_become_safe_error_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            filename = Path(directory) / "openapi.json"
+            filename.write_text(json.dumps(SPEC), encoding="utf-8")
+            for failure, expected in (
+                (RuntimeError("do-not-log-this-secret"), "OpenAPI conversion failed"),
+                (StartupTimeout(), "Schema conversion exceeded 30 seconds"),
+            ):
+                with self.subTest(expected=expected):
+                    with patch.dict(os.environ, {"OPENAPI_SPEC_FILE": str(filename),
+                                              "OPENAPI_CONFIG_JSON": "{}", "PORT": "8080"}, clear=True), \
+                         patch("server.create_server", side_effect=failure), \
+                         patch("server.FastMCP.run_http_async", new_callable=AsyncMock), \
+                         patch("server.create_error_server", wraps=create_error_server) as fallback, \
+                         self.assertLogs("server", level="ERROR") as logs:
+                        await serve()
+                    fallback.assert_called_once()
+                    self.assertIn(expected, fallback.call_args.args[0])
+                    self.assertNotIn("do-not-log-this-secret", " ".join(logs.output))
+
+    async def test_invalid_port_remains_fatal(self):
+        with patch.dict(os.environ, {"PORT": "invalid"}, clear=True):
+            with self.assertRaisesRegex(SystemExit, "PORT must be an integer"):
+                await serve()
 
     async def test_versions_and_native_path_query_body_headers(self):
         calls = []
@@ -147,6 +218,21 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                         self.assertFalse(result.is_error)
                     self.assertEqual(len(calls), 2)
 
+    async def test_direct_mode_exclusions_cannot_be_called(self):
+        document, config = prepare(SPEC, {"exclude": [{"method": "DELETE"}]})
+        calls = []
+
+        def backend(request):
+            calls.append(request)
+            return response({"ok": True})
+
+        async with APIClient(config, transport=httpx.MockTransport(backend)) as http:
+            async with Client(create_server(document, config, http)) as client:
+                self.assertNotIn("deleteItem", {tool.name for tool in await client.list_tools()})
+                result = await client.call_tool("deleteItem", {"id": "1"}, raise_on_error=False)
+                self.assertTrue(result.is_error)
+                self.assertEqual(calls, [])
+
     async def test_http_concurrent_credentials_health_and_cookie_isolation(self):
         for search in (False, True):
             calls = []
@@ -166,6 +252,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                 async with running_http(server.http_app(stateless_http=True)) as url:
                     async with httpx.AsyncClient(trust_env=False) as health:
                         self.assertEqual((await health.get(url + "/healthz")).json(), {"status": "ok"})
+                        self.assertEqual((await health.get(url + "/readyz")).json(), {"status": "ok"})
 
                     async def user(key, missing=False, direct=False):
                         headers = {"Authorization": f"Bearer {key}", "X-Key": key,

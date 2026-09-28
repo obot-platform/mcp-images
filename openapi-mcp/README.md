@@ -18,7 +18,7 @@ JSON schema once at startup and exposes Streamable HTTP at `/mcp`.
 | `baseURL` | Override the API destination; defaults to the specification's first usable server URL |
 | `credentialHeaders` | Required credential header names to forward from each MCP request; defaults to `[]`. Requires HTTPS; values and prefixes are forwarded unchanged |
 | `toolSearch` | Expose `search_tools` and `call_tool` instead of listing API tools; defaults to `false` |
-| `exclude` | Disable operations matching `method`, `pathPattern` (regex), or `tag`; defaults to `[]`. Requires Tool Search |
+| `exclude` | Disable operations matching `method`, `pathPattern` (regex), or `tag`; defaults to `[]`. Obot permits these settings only with Tool Search; the wrapper applies any rules it receives in either mode |
 
 Exclusion fields within a rule must all match; any matching rule excludes the
 operation. For example:
@@ -26,6 +26,16 @@ operation. For example:
 ```json
 {"toolSearch": true, "exclude": [{"method": "DELETE"}, {"pathPattern": "^/admin/"}]}
 ```
+
+## Health and startup errors
+
+`/healthz` reports process liveness and is used by the image health check.
+`/readyz` returns `{"status":"ok"}` when the OpenAPI tools are ready. If the
+schema or settings cannot be loaded or converted, the process stays running:
+`/healthz` still succeeds, `/readyz` returns HTTP 503 with a safe error, and
+MCP requests receive that error without exposing any tools. Fix the mounted
+snapshot or settings and restart the deployment to retry conversion. An invalid
+`PORT` remains fatal because the process cannot bind its configured listener.
 
 ## Example
 
