@@ -18,7 +18,7 @@ Images are divided into three families:
 
 The [OpenAPI MCP wrapper](openapi-mcp/README.md) is a versioned repository image
 that serves stored OpenAPI snapshots using FastMCP, with request-scoped
-credentials and optional tool search.
+credentials and direct tools for API operations.
 
 Node repackages can specify an `npm_overrides` mapping of dependency names to
 versions when upstream dependencies need security patches. Python repackages

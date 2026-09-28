@@ -61,8 +61,8 @@ class NetworkTests(unittest.IsolatedAsyncioTestCase):
 
             checked.backend = AsyncMock()
             checked.backend.connect_tcp.side_effect = connect
-            _, config = prepare(SPEC, {"baseURL": f"https://api.example.test:{port}",
-                                       "credentialHeaders": ["Authorization"]})
+            _, config = prepare(SPEC, base_url=f"https://api.example.test:{port}",
+                                credential_headers="Authorization")
             try:
                 with patch.object(asyncio.get_running_loop(), "getaddrinfo", new=AsyncMock(return_value=[
                     (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.1.2.3", port)),
@@ -111,7 +111,7 @@ class NetworkTests(unittest.IsolatedAsyncioTestCase):
                 await backend.connect_tcp("api.test", 443)
 
     async def test_origin_escape_and_missing_director_metadata_never_send(self):
-        _, config = prepare(SPEC, {})
+        _, config = prepare(SPEC)
         handler = AsyncMock()
         async with APIClient(config, transport=httpx.MockTransport(handler)) as client:
             for url in ("https://other.test/v1", "http://api.example.test/v1", "https://api.example.test:8443/v1"):
@@ -122,7 +122,7 @@ class NetworkTests(unittest.IsolatedAsyncioTestCase):
         handler.assert_not_awaited()
 
     async def test_network_exceptions_are_sanitized(self):
-        _, config = prepare(SPEC, {})
+        _, config = prepare(SPEC)
         handler = AsyncMock(side_effect=RuntimeError("secret-in-exception"))
         async with APIClient(config, transport=httpx.MockTransport(handler)) as client:
             request = httpx.Request("GET", config.base_url)
@@ -132,7 +132,7 @@ class NetworkTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("secret-in-exception", str(error.exception))
 
     async def test_concurrency_and_total_deadline_include_waiting(self):
-        _, config = prepare(SPEC, {})
+        _, config = prepare(SPEC)
         active = peak = 0
 
         async def handler(request):

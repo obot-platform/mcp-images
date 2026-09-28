@@ -8,13 +8,11 @@ from contextlib import contextmanager
 
 from fastmcp import FastMCP
 from fastmcp.server.middleware import Middleware
-from fastmcp.server.providers.openapi import MCPType, RouteMap
-from fastmcp.server.transforms.search import BM25SearchTransform
 from mcp import McpError
 from mcp.types import ErrorData
 from starlette.responses import JSONResponse
 
-from config import ConfigError, json_object, load_spec, prepare
+from config import ConfigError, load_spec, prepare
 from network import APIClient, IsolatedDirector
 
 
@@ -54,19 +52,11 @@ def create_server(document, config, client):
     def isolate_headers(route, tool):
         tool._director = IsolatedDirector(tool._director)
 
-    mappings = [RouteMap(
-        methods=[rule["method"]] if "method" in rule else "*",
-        pattern=rule.get("pathPattern", ".*"),
-        tags={rule["tag"]} if "tag" in rule else set(),
-        mcp_type=MCPType.EXCLUDE,
-    ) for rule in config.exclude]
     server = FastMCP.from_openapi(
         openapi_spec=document, client=client, name=document.get("info", {}).get("title", "OpenAPI"),
-        route_maps=mappings, mcp_component_fn=isolate_headers, mask_error_details=True,
+        mcp_component_fn=isolate_headers, mask_error_details=True,
         validate_output=False,
     )
-    if config.tool_search:
-        server.add_transform(BM25SearchTransform())
 
     add_status_routes(server)
     return server
@@ -106,7 +96,8 @@ async def serve():
         with startup_deadline():
             document, config = prepare(
                 load_spec(os.environ.get("OPENAPI_SPEC_FILE", "")),
-                json_object(os.environ.get("OPENAPI_CONFIG_JSON", "{}"), "OPENAPI_CONFIG_JSON"),
+                base_url=os.environ.get("OPENAPI_BASE_URL"),
+                credential_headers=os.environ.get("OPENAPI_CREDENTIAL_HEADERS", ""),
             )
             client = APIClient(config)
             try:

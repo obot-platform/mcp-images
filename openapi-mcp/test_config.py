@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from config import MAX_INPUT, MAX_SPEC, ConfigError, checked_address, json_object, load_spec, prepare
+from config import MAX_SPEC, ConfigError, checked_address, json_object, load_spec, prepare
 
 SPEC = json.loads((Path(__file__).parent / "fixtures/api.json").read_text())
 
@@ -15,12 +15,12 @@ class ConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "snapshot.json"
             mounted = Path(directory) / "OPENAPI_SPEC_FILE"
-            spec = {**SPEC, "x-padding": "x" * MAX_INPUT}
+            spec = {**SPEC, "x-padding": "x" * (MAX_SPEC // 2)}
             target.write_text(json.dumps(spec), encoding="utf-8")
             mounted.symlink_to(target)
             snapshot = load_spec(str(mounted))
             self.assertEqual(snapshot, spec)
-            document, _ = prepare(snapshot, {})
+            document, _ = prepare(snapshot)
             self.assertEqual(document["info"]["title"], SPEC["info"]["title"])
             target.write_text("{}", encoding="utf-8")
             self.assertEqual(snapshot, spec)  # no live file-backed state
@@ -49,31 +49,20 @@ class ConfigTests(unittest.TestCase):
             spec = copy.deepcopy(SPEC)
             spec["openapi"] = version
             original = copy.deepcopy(spec)
-            document, config = prepare(spec, {})
+            document, config = prepare(spec)
             self.assertEqual(spec, original)
-            self.assertFalse(config.tool_search)
+            self.assertEqual(config.credential_headers, ())
             self.assertEqual(config.base_url, "https://api.example.test/v1/")
 
-    def test_bad_settings(self):
-        cases = [
-            {"unknown": 1}, {"toolSearch": "true"}, {"exclude": {}},
-            {"credentialHeaders": "Authorization"},
-            {"credentialHeaders": ["Host"]}, {"credentialHeaders": ["Cookie"]},
-            {"credentialHeaders": ["bad\nname"]}, {"credentialHeaders": ["X-Key", "x-key"]},
-        ]
-        cases += [{"toolSearch": True, "exclude": [rule]} for rule in (
-            {}, {"method": "get"}, {"method": ["GET"]}, {"tag": ""},
-            {"tag": "  "}, {"pathPattern": "["}, {"include": True},
-        )]
-        for settings in cases:
-            with self.subTest(settings=settings), self.assertRaises(ValueError):
-                prepare(SPEC, settings)
-
-    def test_exclusions_are_preserved_without_tool_search(self):
-        rules = [{"method": "DELETE"}]
-        _, config = prepare(SPEC, {"exclude": rules})
-        self.assertFalse(config.tool_search)
-        self.assertEqual(config.exclude, tuple(rules))
+    def test_credential_header_list(self):
+        _, config = prepare(SPEC, credential_headers=" Authorization, X-Key ")
+        self.assertEqual(config.credential_headers, ("authorization", "x-key"))
+        for value in ("", "  "):
+            self.assertEqual(prepare(SPEC, credential_headers=value)[1].credential_headers, ())
+        for value in ("Host", "Cookie", "bad\nname", "X-Key,x-key", ",X-Key",
+                      "X-Key,", "X-Key,,Authorization", ["X-Key"]):
+            with self.subTest(value=value), self.assertRaises(ConfigError):
+                prepare(SPEC, credential_headers=value)
 
     def test_references_auth_and_credentials_not_tool_parameters(self):
         spec = copy.deepcopy(SPEC)
@@ -82,30 +71,31 @@ class ConfigTests(unittest.TestCase):
             "parameters": {"key": {"name": "X-Key", "in": "header", "schema": {"type": "string"}}},
         }
         spec["paths"]["/items"]["get"]["parameters"] = [{"$ref": "#/components/parameters/key"}]
-        with self.assertRaisesRegex(ValueError, "credentialHeaders"):
-            prepare(spec, {})
-        document, config = prepare(spec, {"credentialHeaders": ["X-Key"]})
+        with self.assertRaisesRegex(ValueError, "OPENAPI_CREDENTIAL_HEADERS"):
+            prepare(spec)
+        document, config = prepare(spec, credential_headers="X-Key")
         self.assertEqual(document["paths"]["/items"]["get"]["parameters"], [])
         for scheme in ({"type": "oauth2"}, {"type": "apiKey", "in": "query", "name": "key"}):
             spec["components"]["securitySchemes"]["key"] = scheme
             with self.assertRaisesRegex(ValueError, "Only header"):
-                prepare(spec, {})
+                prepare(spec)
         for ref in ("https://other.test/schema", "file:///tmp/schema", "#/missing"):
             bad = copy.deepcopy(SPEC)
             bad["components"] = {"schemas": {"test": {"$ref": ref}}}
             with self.assertRaises(ValueError):
-                prepare(bad, {})
+                prepare(bad)
 
     def test_destination_and_override(self):
         for value in ("/relative", "https://user:password@api.test", "http://localhost",
                       "http://127.0.0.1", "http://[::1]", "http://169.254.169.254",
                       "http://api.test?key=secret", "https://{host}", "https://api.test:invalid"):
             with self.subTest(value=value), self.assertRaises(ValueError):
-                prepare(SPEC, {"baseURL": value})
-        document, config = prepare(SPEC, {"baseURL": "http://10.0.0.8/api"})
+                prepare(SPEC, base_url=value)
+        document, config = prepare(SPEC, base_url="http://10.0.0.8/api")
         self.assertEqual(config.base_url, "http://10.0.0.8/api/")
+        self.assertEqual(prepare(SPEC, base_url="")[1].base_url, "https://api.example.test/v1/")
         with self.assertRaisesRegex(ValueError, "HTTPS"):
-            prepare(SPEC, {"baseURL": "http://10.0.0.8", "credentialHeaders": ["Authorization"]})
+            prepare(SPEC, base_url="http://10.0.0.8", credential_headers="Authorization")
 
     def test_address_policy(self):
         for address in ("127.0.0.2", "::1", "::", "0.0.0.0", "0.1.2.3", "169.254.169.254",
@@ -116,7 +106,7 @@ class ConfigTests(unittest.TestCase):
             checked_address(address)
 
     def test_input_bounds(self):
-        for raw in ("[]", "{", '{"x": NaN}', " " * (MAX_INPUT + 1)):
+        for raw in ("[]", "{", '{"x": NaN}', " " * (MAX_SPEC + 1)):
             with self.assertRaises(ValueError):
                 json_object(raw, "test")
 

@@ -50,10 +50,12 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_startup_stays_alive_and_reports_safe_errors(self):
         cases = (
             ({"OPENAPI_SPEC_FILE": ""}, "OPENAPI_SPEC_FILE must name a readable"),
-            ({"OPENAPI_CONFIG_JSON": '{"baseURL":"http://localhost"}'},
+            ({"OPENAPI_BASE_URL": "http://localhost"},
              "Local destinations are prohibited"),
-            ({"OPENAPI_CONFIG_JSON": '{"baseURL":"https://do-not-log-this-secret.test",'},
-             "OPENAPI_CONFIG_JSON must contain valid JSON"),
+            ({"OPENAPI_BASE_URL": "https://do-not-log-this-secret.test?token=private"},
+             "OPENAPI_BASE_URL must be absolute"),
+            ({"OPENAPI_CREDENTIAL_HEADERS": "Authorization,,X-Key"},
+             "OPENAPI_CREDENTIAL_HEADERS must list valid"),
         )
         with tempfile.TemporaryDirectory() as directory:
             filename = Path(directory) / "openapi.json"
@@ -69,7 +71,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                         sock.bind(("127.0.0.1", 0))
                         port = sock.getsockname()[1]
                     env = {"PORT": str(port), "OPENAPI_SPEC_FILE": str(filename),
-                           "OPENAPI_CONFIG_JSON": "{}", **overrides}
+                           **overrides}
                     process = subprocess.Popen(
                         [sys.executable, str(Path(__file__).parent / "server.py")],
                         env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
@@ -126,7 +128,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             ):
                 with self.subTest(expected=expected):
                     with patch.dict(os.environ, {"OPENAPI_SPEC_FILE": str(filename),
-                                              "OPENAPI_CONFIG_JSON": "{}", "PORT": "8080"}, clear=True), \
+                                              "PORT": "8080"}, clear=True), \
                          patch("server.create_server", side_effect=failure), \
                          patch("server.FastMCP.run_http_async", new_callable=AsyncMock), \
                          patch("server.create_error_server", wraps=create_error_server) as fallback, \
@@ -135,6 +137,24 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                     fallback.assert_called_once()
                     self.assertIn(expected, fallback.call_args.args[0])
                     self.assertNotIn("do-not-log-this-secret", " ".join(logs.output))
+
+    async def test_separate_environment_settings_replace_json_configuration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            filename = Path(directory) / "openapi.json"
+            filename.write_text(json.dumps(SPEC), encoding="utf-8")
+            settings = {"OPENAPI_SPEC_FILE": str(filename),
+                        "OPENAPI_BASE_URL": "https://override.test/api",
+                        "OPENAPI_CREDENTIAL_HEADERS": "Authorization, X-Key",
+                        "OPENAPI_CONFIG_JSON": "{invalid", "PORT": "8080"}
+            with patch.dict(os.environ, settings, clear=True), \
+                 patch("server.create_server", wraps=create_server) as created, \
+                 patch("server.FastMCP.run_http_async", new_callable=AsyncMock) as run:
+                await serve()
+            created.assert_called_once()
+            config = created.call_args.args[1]
+            self.assertEqual(config.base_url, "https://override.test/api/")
+            self.assertEqual(config.credential_headers, ("authorization", "x-key"))
+            run.assert_awaited_once()
 
     async def test_invalid_port_remains_fatal(self):
         with patch.dict(os.environ, {"PORT": "invalid"}, clear=True):
@@ -151,7 +171,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         for version in ("3.0.0", "3.0.3", "3.0.4", "3.1.0", "3.1.1", "3.1.2"):
             spec = copy.deepcopy(SPEC)
             spec["openapi"] = version
-            document, config = prepare(spec, {"baseURL": "https://override.test/base"})
+            document, config = prepare(spec, base_url="https://override.test/base")
             async with APIClient(config, transport=httpx.MockTransport(backend)) as http:
                 async with Client(create_server(document, config, http)) as client:
                     tools = await client.list_tools()
@@ -175,111 +195,57 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         def backend(request):
             return response({"id": "upstream-string"})
 
-        for tool_search in (False, True):
-            with self.subTest(tool_search=tool_search):
-                document, config = prepare(spec, {"toolSearch": tool_search})
-                async with APIClient(config, transport=httpx.MockTransport(backend)) as http:
-                    async with Client(create_server(document, config, http)) as client:
-                        tool, args = (("call_tool", {"name": "getItem", "arguments": {"id": "1"}})
-                                      if tool_search else ("getItem", {"id": "1"}))
-                        result = await client.call_tool(tool, args, raise_on_error=False)
-                        self.assertFalse(result.is_error, str(result))
-                        self.assertIn("upstream-string", str(result))
-
-    async def test_exclusions_all_invocation_paths(self):
-        cases = [
-            ([{"method": "DELETE"}, {"pathPattern": "^/admin/"}, {"tag": "internal"}],
-             {"deleteItem", "adminStatus", "internalStatus"}),
-            ([{"method": "POST", "pathPattern": "^/items$"}], {"createItem"}),
-            ([{"tag": "Internal"}], set()),
-        ]
-        for rules, excluded in cases:
-            document, config = prepare(SPEC, {"toolSearch": True, "exclude": rules})
-            calls = []
-
-            def backend(request):
-                calls.append(request)
-                return response({"ok": True})
-
-            async with APIClient(config, transport=httpx.MockTransport(backend)) as http:
-                async with Client(create_server(document, config, http)) as client:
-                    self.assertEqual({t.name for t in await client.list_tools()}, {"search_tools", "call_tool"})
-                    for name in excluded:
-                        found = await client.call_tool("search_tools", {"query": name})
-                        self.assertNotIn(name, str(found))
-                        for tool, args in ((name, {"id": "1"}),
-                                           ("call_tool", {"name": name, "arguments": {"id": "1"}})):
-                            result = await client.call_tool(tool, args, raise_on_error=False)
-                            self.assertTrue(result.is_error)
-                    self.assertEqual(calls, [])
-                    for tool, args in (("getItem", {"id": "1"}),
-                                       ("call_tool", {"name": "getItem", "arguments": {"id": "1"}})):
-                        result = await client.call_tool(tool, args)
-                        self.assertFalse(result.is_error)
-                    self.assertEqual(len(calls), 2)
-
-    async def test_direct_mode_exclusions_cannot_be_called(self):
-        document, config = prepare(SPEC, {"exclude": [{"method": "DELETE"}]})
-        calls = []
-
-        def backend(request):
-            calls.append(request)
-            return response({"ok": True})
-
+        document, config = prepare(spec)
         async with APIClient(config, transport=httpx.MockTransport(backend)) as http:
             async with Client(create_server(document, config, http)) as client:
-                self.assertNotIn("deleteItem", {tool.name for tool in await client.list_tools()})
-                result = await client.call_tool("deleteItem", {"id": "1"}, raise_on_error=False)
-                self.assertTrue(result.is_error)
-                self.assertEqual(calls, [])
+                result = await client.call_tool("getItem", {"id": "1"}, raise_on_error=False)
+                self.assertFalse(result.is_error, str(result))
+                self.assertIn("upstream-string", str(result))
 
     async def test_http_concurrent_credentials_health_and_cookie_isolation(self):
-        for search in (False, True):
-            calls = []
-            both_started = asyncio.Event()
+        calls = []
+        both_started = asyncio.Event()
 
-            async def backend(request):
-                calls.append(request)
-                if len(calls) >= 2:
-                    both_started.set()
-                await asyncio.wait_for(both_started.wait(), 5)
-                return response({"ok": True}, **{"set-cookie": "session=not-for-another-user"})
+        async def backend(request):
+            calls.append(request)
+            if len(calls) >= 2:
+                both_started.set()
+            await asyncio.wait_for(both_started.wait(), 5)
+            return response({"ok": True}, **{"set-cookie": "session=not-for-another-user"})
 
-            document, config = prepare(SPEC, {"toolSearch": search,
-                                             "credentialHeaders": ["Authorization", "X-Key"]})
-            async with APIClient(config, transport=httpx.MockTransport(backend)) as http:
-                server = create_server(document, config, http)
-                async with running_http(server.http_app(stateless_http=True)) as url:
-                    async with httpx.AsyncClient(trust_env=False) as health:
-                        self.assertEqual((await health.get(url + "/healthz")).json(), {"status": "ok"})
-                        self.assertEqual((await health.get(url + "/readyz")).json(), {"status": "ok"})
+        document, config = prepare(SPEC, credential_headers="Authorization, X-Key")
+        async with APIClient(config, transport=httpx.MockTransport(backend)) as http:
+            server = create_server(document, config, http)
+            async with running_http(server.http_app(stateless_http=True)) as url:
+                async with httpx.AsyncClient(trust_env=False) as health:
+                    self.assertEqual((await health.get(url + "/healthz")).json(), {"status": "ok"})
+                    self.assertEqual((await health.get(url + "/readyz")).json(), {"status": "ok"})
 
-                    async def user(key, missing=False, direct=False):
-                        headers = {"Authorization": f"Bearer {key}", "X-Key": key,
-                                   "X-Unwanted": "login-token", "Cookie": "session=client",
-                                   "X-View": "incoming-not-an-argument"}
-                        if missing:
-                            del headers["X-Key"]
-                        async with Client(StreamableHttpTransport(url + "/mcp", headers=headers)) as client:
-                            tools = await client.list_tools()
-                            self.assertNotIn(key, str(tools))
-                            tool, args = ("call_tool", {"name": "getItem", "arguments": {"id": key}}) if search and not direct else ("getItem", {"id": key})
-                            return await client.call_tool(tool, args, raise_on_error=False)
+                async def user(key, missing=False):
+                    headers = {"Authorization": f"Bearer {key}", "X-Key": key,
+                               "X-Unwanted": "login-token", "Cookie": "session=client",
+                               "X-View": "incoming-not-an-argument"}
+                    if missing:
+                        del headers["X-Key"]
+                    async with Client(StreamableHttpTransport(url + "/mcp", headers=headers)) as client:
+                        tools = await client.list_tools()
+                        self.assertNotIn(key, str(tools))
+                        return await client.call_tool("getItem", {"id": key}, raise_on_error=False)
 
-                    results = await asyncio.gather(user("user-a-secret"), user("user-b-secret"))
-                    self.assertTrue(all(not r.is_error for r in results))
-                    missing = await user("missing-secret", missing=True)
-                    self.assertTrue(missing.is_error)
-                    self.assertEqual(len(calls), 2)
-                    await user("user-c-secret", direct=True)  # fresh connection and hidden direct tool
-                    self.assertEqual(len(calls), 3)
-                    for request in calls:
-                        key = request.url.path.rsplit("/", 1)[1]
-                        self.assertEqual(request.headers["Authorization"], f"Bearer {key}")
-                        self.assertEqual(request.headers["X-Key"], key)
-                        for header in ("X-Unwanted", "Cookie", "X-View", "Mcp-Session-Id"):
-                            self.assertNotIn(header, request.headers)
-                    self.assertFalse(http.cookies)
+                results = await asyncio.gather(user("user-a-secret"), user("user-b-secret"))
+                self.assertTrue(all(not r.is_error for r in results))
+                missing = await user("missing-secret", missing=True)
+                self.assertTrue(missing.is_error)
+                self.assertEqual(len(calls), 2)
+                await user("user-c-secret")
+                self.assertEqual(len(calls), 3)
+                for request in calls:
+                    key = request.url.path.rsplit("/", 1)[1]
+                    self.assertEqual(request.headers["Authorization"], f"Bearer {key}")
+                    self.assertEqual(request.headers["X-Key"], key)
+                    for header in ("X-Unwanted", "Cookie", "X-View", "Mcp-Session-Id"):
+                        self.assertNotIn(header, request.headers)
+                self.assertFalse(http.cookies)
 
     async def test_upstream_failures_limits_and_echoes(self):
         async def slow(request):
@@ -294,7 +260,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             (lambda _: response({}, **{"content-encoding": "gzip"}), "identity"),
             (slow, "timed out"),
         ]
-        document, config = prepare(SPEC, {"credentialHeaders": ["Authorization"]})
+        document, config = prepare(SPEC, credential_headers="Authorization")
         for backend, message in cases:
             with self.subTest(message=message), patch("network.get_http_headers", return_value={"authorization": "Bearer test-credential"}), patch("network.MAX_RESPONSE", 100), patch("network.REQUEST_TIMEOUT", 0.05):
                 async with APIClient(config, transport=httpx.MockTransport(backend)) as http:

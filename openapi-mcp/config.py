@@ -14,7 +14,6 @@ class ConfigError(ValueError):
     """A validation error whose message is safe to display at startup."""
 
 
-MAX_INPUT = 96 * 1024
 MAX_SPEC = 1024 * 1024
 METHODS = {"GET", "PUT", "POST", "DELETE", "OPTIONS", "HEAD", "PATCH", "TRACE"}
 RESERVED_HEADERS = {
@@ -37,14 +36,14 @@ def checked_address(value: str):
 
 def destination(value: str) -> str:
     if not isinstance(value, str) or not value or any(c in value for c in "{}\\\r\n\t"):
-        raise ConfigError("baseURL must be an absolute HTTP(S) URL")
+        raise ConfigError("OPENAPI_BASE_URL must be an absolute HTTP(S) URL")
     try:
         url = httpx.URL(value)
     except httpx.InvalidURL:
-        raise ConfigError("baseURL must be a valid absolute HTTP(S) URL") from None
+        raise ConfigError("OPENAPI_BASE_URL must be a valid absolute HTTP(S) URL") from None
     if (url.scheme not in ("http", "https") or not url.host or url.userinfo
             or url.query or url.fragment):
-        raise ConfigError("baseURL must be absolute HTTP(S), without credentials, query, or fragment")
+        raise ConfigError("OPENAPI_BASE_URL must be absolute HTTP(S), without credentials, query, or fragment")
     if url.host.rstrip(".").lower() == "localhost" or url.host.lower().endswith(".localhost"):
         raise ConfigError("Local destinations are prohibited")
     try:
@@ -56,7 +55,7 @@ def destination(value: str) -> str:
     return str(url).rstrip("/") + "/"
 
 
-def json_object(raw: str, name: str, *, max_bytes: int = MAX_INPUT) -> dict:
+def json_object(raw: str, name: str, *, max_bytes: int = MAX_SPEC) -> dict:
     def reject_constant(value):
         raise ValueError("Non-finite JSON number")
 
@@ -93,37 +92,23 @@ def load_spec(filename: str) -> dict:
 class Config:
     base_url: str
     credential_headers: tuple[str, ...]
-    tool_search: bool
-    exclude: tuple[dict, ...]
 
 
-def prepare(spec: dict, settings: dict) -> tuple[dict, Config]:
-    if settings.keys() - {"baseURL", "credentialHeaders", "toolSearch", "exclude"}:
-        raise ConfigError("Unknown configuration field")
-    search = settings.get("toolSearch", False)
-    headers = settings.get("credentialHeaders", [])
-    rules = settings.get("exclude", [])
-    if type(search) is not bool or not isinstance(rules, list):
-        raise ConfigError("toolSearch must be a boolean and exclude must be a list")
-    if not isinstance(headers, list) or any(
-        not isinstance(h, str) or not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", h)
+def prepare(spec: dict, *, base_url: str | None = None,
+            credential_headers: str = "") -> tuple[dict, Config]:
+    if not isinstance(credential_headers, str):
+        raise ConfigError("OPENAPI_CREDENTIAL_HEADERS must be comma-separated header names")
+    headers = ([header.strip() for header in credential_headers.split(",")]
+               if credential_headers.strip() else [])
+    if any(
+        not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", h)
         or h.lower() in RESERVED_HEADERS or h.lower().startswith(("mcp-", "sec-", "proxy-"))
         for h in headers
     ):
-        raise ConfigError("credentialHeaders must list valid non-transport header names")
+        raise ConfigError("OPENAPI_CREDENTIAL_HEADERS must list valid non-transport header names")
     headers = tuple(h.lower() for h in headers)
     if len(set(headers)) != len(headers):
         raise ConfigError("Duplicate credential header names")
-    for rule in rules:
-        if (not isinstance(rule, dict) or not rule or rule.keys() - {"method", "pathPattern", "tag"}
-                or any(not isinstance(v, str) or not v.strip() for v in rule.values())):
-            raise ConfigError("Exclusion rules require nonempty method, pathPattern, or tag strings")
-        if "method" in rule and rule["method"] not in METHODS:
-            raise ConfigError("Exclusion method must be an uppercase HTTP method")
-        try:
-            re.compile(rule.get("pathPattern", ".*"))
-        except re.error:
-            raise ConfigError("Invalid exclusion pathPattern regular expression") from None
 
     document = copy.deepcopy(spec)
     version = document.get("openapi", "")
@@ -176,10 +161,10 @@ def prepare(spec: dict, settings: dict) -> tuple[dict, Config]:
         else:
             raise ConfigError("Only header API keys and pre-issued bearer credentials are supported")
         if name not in headers:
-            raise ConfigError("Declare every security scheme's header in credentialHeaders")
+            raise ConfigError("Declare every security scheme's header in OPENAPI_CREDENTIAL_HEADERS")
 
-    if "baseURL" in settings:
-        base = destination(settings["baseURL"])
+    if base_url:
+        base = destination(base_url)
     else:
         base = None
         for server in document.get("servers", []):
@@ -189,7 +174,7 @@ def prepare(spec: dict, settings: dict) -> tuple[dict, Config]:
             except (ValueError, httpx.InvalidURL):
                 continue
         if base is None:
-            raise ConfigError("No usable server URL; configure baseURL")
+            raise ConfigError("No usable server URL; configure OPENAPI_BASE_URL")
     if headers and httpx.URL(base).scheme != "https":
         raise ConfigError("Credential forwarding requires an HTTPS destination")
     if document.get("webhooks"):
@@ -215,4 +200,4 @@ def prepare(spec: dict, settings: dict) -> tuple[dict, Config]:
                     raise ConfigError("Cookie parameters are unsupported")
                 parameters.append(parameter)
             owner["parameters"] = parameters
-    return document, Config(base, headers, search, tuple(rules))
+    return document, Config(base, headers)

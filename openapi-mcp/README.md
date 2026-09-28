@@ -8,24 +8,12 @@ JSON schema once at startup and exposes Streamable HTTP at `/mcp`.
 | Environment variable | Value |
 | --- | --- |
 | `OPENAPI_SPEC_FILE` | Required path to an OpenAPI JSON file, at most 1 MiB |
-| `OPENAPI_CONFIG_JSON` | Settings object, at most 96 KiB; defaults to `{}` |
+| `OPENAPI_BASE_URL` | Optional API destination override; defaults to the specification's first usable server URL |
+| `OPENAPI_CREDENTIAL_HEADERS` | Optional comma-separated credential header names, such as `Authorization, X-API-Key`; defaults to none. Requires HTTPS; values and prefixes are forwarded unchanged |
 | `PORT` | Listening port; defaults to `8080` |
 
-`OPENAPI_CONFIG_JSON` accepts:
-
-| Setting | Description |
-| --- | --- |
-| `baseURL` | Override the API destination; defaults to the specification's first usable server URL |
-| `credentialHeaders` | Required credential header names to forward from each MCP request; defaults to `[]`. Requires HTTPS; values and prefixes are forwarded unchanged |
-| `toolSearch` | Expose `search_tools` and `call_tool` instead of listing API tools; defaults to `false` |
-| `exclude` | Disable operations matching `method`, `pathPattern` (regex), or `tag`; defaults to `[]`. Obot permits these settings only with Tool Search; the wrapper applies any rules it receives in either mode |
-
-Exclusion fields within a rule must all match; any matching rule excludes the
-operation. For example:
-
-```json
-{"toolSearch": true, "exclude": [{"method": "DELETE"}, {"pathPattern": "^/admin/"}]}
-```
+The header setting lists names only. Obot sends their values on each MCP request.
+The wrapper exposes generated API operations directly as MCP tools.
 
 ## Health and startup errors
 
@@ -51,7 +39,6 @@ docker run --rm --name frankfurter-mcp \
   -p 127.0.0.1:8086:8080 \
   --mount "type=bind,source=$schema_dir/frankfurter-openapi.json,target=/files/openapi.json,readonly" \
   -e OPENAPI_SPEC_FILE=/files/openapi.json \
-  -e 'OPENAPI_CONFIG_JSON={"toolSearch":false}' \
   openapi-mcp:test
 ```
 
