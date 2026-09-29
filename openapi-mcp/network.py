@@ -20,10 +20,11 @@ MAX_CONCURRENT = 32
 
 
 class CheckedBackend(httpcore.AsyncNetworkBackend):
-    """Resolve once, validate all answers, and connect to a validated numeric IP.
+    """Enforce the network policy at connection time, including after DNS changes.
 
-    httpcore still performs TLS using the original hostname. AutoBackend is the
-    only private httpcore adapter used here; its version is pinned and tested.
+    Checking only the configured URL would leave a DNS-rebinding gap. Resolve
+    and check every answer, then connect to one checked IP while httpcore uses
+    the original hostname for TLS. AutoBackend is pinned and tested here.
     """
 
     def __init__(self):
@@ -65,6 +66,11 @@ class CoreStream(httpx.AsyncByteStream):
 
 
 class CheckedTransport(httpx.AsyncBaseTransport):
+    """Bridge httpx to a pool that uses CheckedBackend for every connection.
+
+    httpx's standard transport does not expose httpcore's network_backend.
+    """
+
     def __init__(self):
         self.pool = httpcore.AsyncConnectionPool(
             ssl_context=ssl.create_default_context(), network_backend=CheckedBackend(),
@@ -88,8 +94,10 @@ class CheckedTransport(httpx.AsyncBaseTransport):
 class IsolatedDirector:
     """Capture native generated headers before FastMCP adds incoming MCP headers.
 
-    This deliberately small adapter depends on FastMCP 3.4.7's tool._director.
-    Execution and all OpenAPI serialization remain owned by FastMCP.
+    FastMCP copies arbitrary caller headers onto outbound requests after build;
+    APIClient restores this snapshot and then adds only declared credentials.
+    This adapter depends on FastMCP 3.4.7's tool._director. Execution and all
+    OpenAPI serialization remain owned by FastMCP.
     """
 
     def __init__(self, director):

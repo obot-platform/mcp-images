@@ -53,8 +53,13 @@ def create_server(document, config, client):
         tool._director = IsolatedDirector(tool._director)
 
     server = FastMCP.from_openapi(
-        openapi_spec=document, client=client, name=document.get("info", {}).get("title", "OpenAPI"),
-        mcp_component_fn=isolate_headers, mask_error_details=True,
+        openapi_spec=document,
+        client=client,
+        name=document.get("info", {}).get("title", "OpenAPI"),
+        mcp_component_fn=isolate_headers,
+        # Library exceptions may contain API responses or request details.
+        mask_error_details=True,
+        # Real API responses can differ from the published OpenAPI response schema.
         validate_output=False,
     )
 

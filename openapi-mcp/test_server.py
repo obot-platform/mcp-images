@@ -61,10 +61,11 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             filename = Path(directory) / "openapi.json"
             filename.write_text(json.dumps(SPEC), encoding="utf-8")
             invalid_filename = Path(directory) / "invalid-openapi.json"
-            invalid_filename.write_text(json.dumps({"info": {"title": "do-not-log-this-secret"}}),
+            invalid_filename.write_text(json.dumps({**SPEC, "openapi": "2.0.0",
+                                                    "info": {"title": "do-not-log-this-secret"}}),
                                         encoding="utf-8")
             cases += (({"OPENAPI_SPEC_FILE": str(invalid_filename)},
-                       "Supported OpenAPI versions"),)
+                       "Invalid OpenAPI document or configuration"),)
             for overrides, expected in cases:
                 with self.subTest(expected=expected):
                     with socket.socket() as sock:

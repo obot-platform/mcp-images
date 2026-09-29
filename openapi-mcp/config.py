@@ -1,4 +1,4 @@
-"""Validate deployment configuration without fetching schemas or references."""
+"""Prepare an OpenAPI snapshot and enforce the wrapper's runtime boundaries."""
 
 import copy
 import ipaddress
@@ -10,12 +10,14 @@ from urllib.parse import unquote
 
 import httpx
 
+
 class ConfigError(ValueError):
-    """A validation error whose message is safe to display at startup."""
+    """A runtime input error whose message is safe to display at startup."""
 
 
-MAX_SPEC = 1024 * 1024
+# Operations can override the document's server URL; remove those overrides below.
 METHODS = {"GET", "PUT", "POST", "DELETE", "OPTIONS", "HEAD", "PATCH", "TRACE"}
+# Never use HTTP transport/control headers as API credentials or tool parameters.
 RESERVED_HEADERS = {
     "host", "cookie", "set-cookie", "content-length", "content-type", "accept",
     "connection", "transfer-encoding", "upgrade", "te", "trailer", "keep-alive",
@@ -24,6 +26,7 @@ RESERVED_HEADERS = {
 
 
 def checked_address(value: str):
+    """Enforce outbound network policy for literal IPs and each DNS connection."""
     address = ipaddress.ip_address(value)
     if isinstance(address, ipaddress.IPv6Address):
         address = address.ipv4_mapped or address
@@ -55,12 +58,10 @@ def destination(value: str) -> str:
     return str(url).rstrip("/") + "/"
 
 
-def json_object(raw: str, name: str, *, max_bytes: int = MAX_SPEC) -> dict:
+def json_object(raw: str, name: str) -> dict:
     def reject_constant(value):
         raise ValueError("Non-finite JSON number")
 
-    if len(raw.encode()) > max_bytes:
-        raise ConfigError(f"{name} exceeds {max_bytes // 1024} KiB")
     try:
         result = json.loads(raw, parse_constant=reject_constant)
     except (ValueError, RecursionError):
@@ -76,16 +77,14 @@ def load_spec(filename: str) -> dict:
         raise ConfigError("OPENAPI_SPEC_FILE must name a readable OpenAPI JSON file")
     try:
         with Path(filename).open("rb") as source:
-            raw = source.read(MAX_SPEC + 1)
+            raw = source.read()
     except (OSError, ValueError):
         raise ConfigError("Cannot read OPENAPI_SPEC_FILE; check the path and file permissions") from None
-    if len(raw) > MAX_SPEC:
-        raise ConfigError("OPENAPI_SPEC_FILE exceeds 1024 KiB")
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
         raise ConfigError("OPENAPI_SPEC_FILE must contain UTF-8 JSON") from None
-    return json_object(text, "OPENAPI_SPEC_FILE", max_bytes=MAX_SPEC)
+    return json_object(text, "OPENAPI_SPEC_FILE")
 
 
 @dataclass(frozen=True)
@@ -96,6 +95,8 @@ class Config:
 
 def prepare(spec: dict, *, base_url: str | None = None,
             credential_headers: str = "") -> tuple[dict, Config]:
+    # Obot validates catalog settings. These checks keep malformed environment
+    # values from changing how the shared HTTP client sends credential headers.
     if not isinstance(credential_headers, str):
         raise ConfigError("OPENAPI_CREDENTIAL_HEADERS must be comma-separated header names")
     headers = ([header.strip() for header in credential_headers.split(",")]
@@ -111,11 +112,13 @@ def prepare(spec: dict, *, base_url: str | None = None,
         raise ConfigError("Duplicate credential header names")
 
     document = copy.deepcopy(spec)
-    version = document.get("openapi", "")
-    if not isinstance(version, str) or not re.fullmatch(r"3\.(0\.[0-4]|1\.[0-2])", version):
-        raise ConfigError("Supported OpenAPI versions are 3.0.0–3.0.4 and 3.1.0–3.1.2")
-    # openapi-pydantic's supported patch labels lag the specifications.
-    document["openapi"] = "3.0.3" if version.startswith("3.0.") else "3.1.1"
+    version = document.get("openapi")
+    # openapi-pydantic's supported patch labels lag the specifications. Obot
+    # validates the input version; FastMCP handles anything outside these ranges.
+    if isinstance(version, str) and re.fullmatch(r"3\.0\.[0-4]", version):
+        document["openapi"] = "3.0.3"
+    elif isinstance(version, str) and re.fullmatch(r"3\.1\.[0-2]", version):
+        document["openapi"] = "3.1.1"
 
     def reference(ref):
         if not isinstance(ref, str) or not ref.startswith("#/"):
@@ -144,7 +147,9 @@ def prepare(spec: dict, *, base_url: str | None = None,
             if "$dynamicRef" in node or "$recursiveRef" in node:
                 raise ConfigError("Dynamic and recursive JSON Schema references are unsupported")
             if "$ref" in node:
-                reference(node["$ref"])
+                # The container cannot fetch remote references at runtime.
+                if not isinstance(node["$ref"], str) or not node["$ref"].startswith("#/"):
+                    raise ConfigError("Only local JSON pointer references are supported")
             for value in node.values():
                 walk(value)
         elif isinstance(node, list):
@@ -177,16 +182,10 @@ def prepare(spec: dict, *, base_url: str | None = None,
             raise ConfigError("No usable server URL; configure OPENAPI_BASE_URL")
     if headers and httpx.URL(base).scheme != "https":
         raise ConfigError("Credential forwarding requires an HTTPS destination")
-    if document.get("webhooks"):
-        raise ConfigError("OpenAPI webhooks are unsupported")
     document["servers"] = [{"url": base}]
-    for path, item in document.get("paths", {}).items():
-        if not path.startswith("/") or path.startswith("//") or "$ref" in item:
-            raise ConfigError("Paths must be local templates; referenced path items are unsupported")
+    for item in document.get("paths", {}).values():
         for owner in [item, *(item[m.lower()] for m in METHODS if m.lower() in item)]:
             owner.pop("servers", None)
-            if owner.get("callbacks"):
-                raise ConfigError("OpenAPI callbacks are unsupported")
             parameters = []
             for parameter in owner.get("parameters", []):
                 parameter = resolve(parameter)

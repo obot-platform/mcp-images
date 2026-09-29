@@ -7,7 +7,7 @@ JSON schema once at startup and exposes Streamable HTTP at `/mcp`.
 
 | Environment variable | Value |
 | --- | --- |
-| `OPENAPI_SPEC_FILE` | Required path to an OpenAPI JSON file, at most 1 MiB |
+| `OPENAPI_SPEC_FILE` | Required path to an OpenAPI JSON file |
 | `OPENAPI_BASE_URL` | Optional API destination override; defaults to the specification's first usable server URL |
 | `OPENAPI_CREDENTIAL_HEADERS` | Optional comma-separated credential header names, such as `Authorization, X-API-Key`; defaults to none. Requires HTTPS; values and prefixes are forwarded unchanged |
 | `PORT` | Listening port; defaults to `8080` |
@@ -23,7 +23,7 @@ schema or settings cannot be loaded or converted, the process stays running:
 `/healthz` still succeeds, `/readyz` returns HTTP 503 with a safe error, and
 MCP requests receive that error without exposing any tools. Fix the mounted
 snapshot or settings and restart the deployment to retry conversion. An invalid
-`PORT` remains fatal because the process cannot bind its configured listener.
+`PORT` is fatal because the process cannot bind its configured listener.
 
 ## Example
 
