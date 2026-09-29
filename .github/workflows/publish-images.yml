@@ -199,6 +199,35 @@ jobs:
       image_json: ${{ toJson(matrix.image) }}
     secrets: inherit
 
+  published-tags-summary:
+    name: Published image tags
+    needs: [changes, repackages, repository-images, utilities]
+    if: ${{ !cancelled() && needs.changes.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download published image tags
+        uses: actions/download-artifact@v4
+        with:
+          pattern: published-image-tag-*
+          path: published-image-tags
+
+      - name: Summarize published image tags
+        run: |
+          # Expand to an empty array when no image job uploaded a tag artifact.
+          shopt -s nullglob
+          files=(published-image-tags/*/tag.json)
+          {
+            echo "## Published image tags"
+            echo
+            if [ "${#files[@]}" -eq 0 ]; then
+              echo "No image tags were published."
+            else
+              echo "| Image | Family | Published tag |"
+              echo "| --- | --- | --- |"
+              jq -r -s 'sort_by(.family, .name)[] | "| `\(.name)` | \(.family) | `\(.tag)` |"' "${files[@]}"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
   image-rescans:
     needs: [changes, repackages, repository-images, utilities]
     if: always() && needs.changes.result == 'success' && needs.changes.outputs.rescans != '[]'

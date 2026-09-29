@@ -278,6 +278,24 @@ jobs:
           digest=$(crane digest "${{ needs.plan.outputs.repository }}:${{ needs.plan.outputs.tag }}")
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
+      - name: Record published image tag
+        env:
+          IMAGE_NAME: ${{ needs.plan.outputs.name }}
+          IMAGE_FAMILY: ${{ inputs.family }}
+          IMAGE_TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/published-image-tag"
+          jq -n --arg name "$IMAGE_NAME" --arg family "$IMAGE_FAMILY" --arg tag "$IMAGE_TAG" \
+            '{name: $name, family: $family, tag: $tag}' > "$RUNNER_TEMP/published-image-tag/tag.json"
+
+      - name: Upload published image tag
+        uses: actions/upload-artifact@v4
+        with:
+          name: published-image-tag-${{ inputs.family }}-${{ needs.plan.outputs.name }}
+          path: ${{ runner.temp }}/published-image-tag/tag.json
+          if-no-files-found: error
+          overwrite: true
+
       - uses: sigstore/cosign-installer@v4.1.1
         with:
           cosign-release: "v3.0.5"
