@@ -15,6 +15,11 @@ JSON schema once at startup and exposes Streamable HTTP at `/mcp`.
 The header setting lists names only. Obot sends their values on each MCP request.
 The wrapper exposes generated API operations directly as MCP tools.
 
+API requests may connect only to public IP addresses. The wrapper checks DNS
+answers on each new connection and rejects private, loopback, link-local, and
+other non-public addresses. APIs reachable only through a company VPN or other
+private network are not supported yet.
+
 ## Health and startup errors
 
 `/healthz` reports process liveness and is used by the image health check.

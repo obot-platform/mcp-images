@@ -73,7 +73,9 @@ class ConfigTests(unittest.TestCase):
             prepare(spec)
         document, config = prepare(spec, credential_headers="X-Key")
         self.assertEqual(document["paths"]["/items"]["get"]["parameters"], [])
-        for scheme in ({"type": "oauth2"}, {"type": "apiKey", "in": "query", "name": "key"}):
+        spec["components"]["securitySchemes"]["key"] = {"type": "oauth2"}
+        prepare(spec)
+        for scheme in ({"type": "apiKey", "in": "query", "name": "key"},):
             spec["components"]["securitySchemes"]["key"] = scheme
             with self.assertRaisesRegex(ValueError, "Only header"):
                 prepare(spec)
@@ -86,21 +88,26 @@ class ConfigTests(unittest.TestCase):
     def test_destination_and_override(self):
         for value in ("/relative", "https://user:password@api.test", "http://localhost",
                       "http://127.0.0.1", "http://[::1]", "http://169.254.169.254",
+                      "http://10.0.0.8", "http://172.16.0.1", "http://192.168.0.1",
+                      "http://[fd00::1]", "http://100.100.100.200",
                       "http://api.test?key=secret", "https://{host}", "https://api.test:invalid"):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 prepare(SPEC, base_url=value)
-        document, config = prepare(SPEC, base_url="http://10.0.0.8/api")
-        self.assertEqual(config.base_url, "http://10.0.0.8/api/")
+        document, config = prepare(SPEC, base_url="http://8.8.8.8/api")
+        self.assertEqual(config.base_url, "http://8.8.8.8/api/")
         self.assertEqual(prepare(SPEC, base_url="")[1].base_url, "https://api.example.test/v1/")
         with self.assertRaisesRegex(ValueError, "HTTPS"):
-            prepare(SPEC, base_url="http://10.0.0.8", credential_headers="Authorization")
+            prepare(SPEC, base_url="http://8.8.8.8", credential_headers="Authorization")
 
     def test_address_policy(self):
         for address in ("127.0.0.2", "::1", "::", "0.0.0.0", "0.1.2.3", "169.254.169.254",
-                        "fe80::1", "224.0.0.1", "ff02::1", "::ffff:127.0.0.1"):
+                        "fe80::1", "224.0.0.1", "ff02::1", "::ffff:127.0.0.1",
+                        "::127.0.0.1", "100.100.100.200", "64:ff9b::a9fe:a9fe",
+                        "10.1.2.3", "172.16.0.1", "192.168.0.1", "fd00::1",
+                        "198.18.0.1", "2002:0a00:0001::"):
             with self.subTest(address=address), self.assertRaises(ValueError):
                 checked_address(address)
-        for address in ("10.1.2.3", "172.16.0.1", "192.168.0.1", "fd00::1", "8.8.8.8"):
+        for address in ("8.8.8.8", "1.1.1.1", "2606:4700:4700::1111"):
             checked_address(address)
 
     def test_json_input_errors(self):

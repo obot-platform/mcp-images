@@ -29,11 +29,16 @@ def checked_address(value: str):
     """Enforce outbound network policy for literal IPs and each DNS connection."""
     address = ipaddress.ip_address(value)
     if isinstance(address, ipaddress.IPv6Address):
-        address = address.ipv4_mapped or address
-    if (address.is_loopback or address.is_link_local or address.is_unspecified
-            or address.is_multicast or getattr(address, "scope_id", None)
-            or address in ipaddress.ip_network("0.0.0.0/8")):
-        raise ConfigError("Local, link-local, unspecified, and multicast destinations are prohibited")
+        if address.ipv4_mapped:
+            address = address.ipv4_mapped
+        elif (address in ipaddress.ip_network("::/96")
+              or address in ipaddress.ip_network("64:ff9b::/96")):
+            # IPv4-compatible and well-known NAT64 addresses retain an IPv4 target.
+            address = ipaddress.IPv4Address(int(address) & 0xffffffff)
+    # The destination may have resolved since Obot validated its hostname.
+    # Refuse every non-public answer so the dialer cannot fall back to one.
+    if not address.is_global or address.is_multicast or getattr(address, "scope_id", None):
+        raise ConfigError("Prohibited outbound destination address")
     return address
 
 
@@ -159,6 +164,8 @@ def prepare(spec: dict, *, base_url: str | None = None,
     walk(document)
     for scheme in document.get("components", {}).get("securitySchemes", {}).values():
         scheme = resolve(scheme)
+        if scheme.get("type") == "oauth2":
+            continue  # OAuth declarations do not produce forwarded header credentials.
         if scheme.get("type") == "apiKey" and scheme.get("in") == "header":
             name = scheme.get("name", "").lower()
         elif scheme.get("type") == "http" and scheme.get("scheme", "").lower() == "bearer":

@@ -56,7 +56,7 @@ class NetworkTests(unittest.IsolatedAsyncioTestCase):
             checked, actual = CheckedBackend(), AutoBackend()
 
             async def connect(address, target_port, timeout, local_address, socket_options):
-                self.assertEqual(address, "10.1.2.3")
+                self.assertEqual(address, "8.8.8.8")
                 return await actual.connect_tcp("127.0.0.1", target_port, timeout, local_address, socket_options)
 
             checked.backend = AsyncMock()
@@ -65,7 +65,7 @@ class NetworkTests(unittest.IsolatedAsyncioTestCase):
                                 credential_headers="Authorization")
             try:
                 with patch.object(asyncio.get_running_loop(), "getaddrinfo", new=AsyncMock(return_value=[
-                    (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.1.2.3", port)),
+                    (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", port)),
                 ])), patch("network.CheckedBackend", return_value=checked), patch(
                     "network.ssl.create_default_context", return_value=client_ssl,
                 ), patch("network.get_http_headers", return_value={"authorization": "Bearer tls-secret"}):
@@ -90,14 +90,16 @@ class NetworkTests(unittest.IsolatedAsyncioTestCase):
             return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (address, 443)) for address in addresses]
 
         with patch.object(loop, "getaddrinfo", new=AsyncMock(side_effect=[
-            answers(["10.1.2.3"]), answers(["127.0.0.1"]), answers(["10.1.2.3", "169.254.169.254"]),
+            answers(["8.8.8.8"]), answers(["127.0.0.1"]),
+            answers(["8.8.8.8", "169.254.169.254"]), answers(["10.1.2.3"]),
+            answers(["127.0.0.1"]),
         ])) as resolve:
             await backend.connect_tcp("api.test", 443, timeout=1)
-            backend.backend.connect_tcp.assert_awaited_once_with("10.1.2.3", 443, 1, None, None)
-            for _ in range(2):
+            backend.backend.connect_tcp.assert_awaited_once_with("8.8.8.8", 443, 1, None, None)
+            for host in ("api.test", "api.test", "api.test", "2130706433"):
                 with self.assertRaises(ValueError):
-                    await backend.connect_tcp("api.test", 443, timeout=1)
-            self.assertEqual(resolve.await_count, 3)
+                    await backend.connect_tcp(host, 443, timeout=1)
+            self.assertEqual(resolve.await_count, 5)
             self.assertEqual(backend.backend.connect_tcp.await_count, 1)
 
     async def test_all_checked_addresses_can_fail_without_leaking_error(self):
@@ -105,7 +107,7 @@ class NetworkTests(unittest.IsolatedAsyncioTestCase):
         backend.backend = AsyncMock()
         backend.backend.connect_tcp.side_effect = httpcore.ConnectError("private details")
         with patch.object(asyncio.get_running_loop(), "getaddrinfo", new=AsyncMock(return_value=[
-            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.1.2.3", 443)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443)),
         ])):
             with self.assertRaisesRegex(httpcore.ConnectError, "configured destination"):
                 await backend.connect_tcp("api.test", 443)
@@ -120,6 +122,28 @@ class NetworkTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(ToolError, "metadata"):
                 await client.send(httpx.Request("GET", config.base_url))
         handler.assert_not_awaited()
+
+    async def test_declared_credentials_override_generated_and_tool_headers(self):
+        _, config = prepare(SPEC, credential_headers="X-Key")
+
+        received = []
+
+        async def handler(request):
+            received.append(dict(request.headers))
+            return httpx.Response(200, stream=httpx.ByteStream(b'{"ok":true}'))
+
+        with patch("network.get_http_headers", return_value={
+            "x-key": "real-secret", "x-tool": "caller-supplied",
+        }):
+            async with APIClient(config, transport=httpx.MockTransport(handler)) as client:
+                request = httpx.Request("GET", config.base_url, headers={"x-key": "generated"})
+                request.extensions["openapi.generated_headers"] = list(request.headers.raw)
+                request.headers["x-key"] = "tool-supplied"
+                request.headers["x-tool"] = "caller-supplied"
+                response = await client.send(request)
+                self.assertEqual(response.json(), {"ok": True})
+        self.assertEqual(received[0]["x-key"], "real-secret")
+        self.assertNotIn("x-tool", received[0])
 
     async def test_network_exceptions_are_sanitized(self):
         _, config = prepare(SPEC)
