@@ -121,12 +121,11 @@ def contains_credentials(content: bytes, credentials: dict[str, str]) -> bool:
         decoded = text
     # Percent escapes are case-insensitive and can encode only part of a secret.
     percent_decoded = unquote(decoded)
-    for name, value in credentials.items():
+    for value in credentials.values():
         secrets = [value]
-        if name == "authorization":
-            parts = value.split(maxsplit=1)
-            if len(parts) == 2:
-                secrets.append(parts[1])
+        parts = value.split(maxsplit=1)
+        if len(parts) == 2:
+            secrets.append(parts[1])
         for secret in secrets:
             if not secret:
                 continue

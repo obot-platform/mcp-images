@@ -169,6 +169,21 @@ class NetworkTests(unittest.IsolatedAsyncioTestCase):
                         with self.assertRaisesRegex(ToolError, "withheld"):
                             await client.send(request)
 
+    async def test_prefixed_non_authorization_credential_echo_is_withheld(self):
+        _, config = prepare(SPEC, credential_headers="X-Key")
+
+        def backend(request):
+            self.assertEqual(request.headers["x-key"], "Token secret")
+            return httpx.Response(200, stream=httpx.ByteStream(b'{"echo":"secret"}'))
+
+        transport = httpx.MockTransport(backend)
+        with patch("network.get_http_headers", return_value={"x-key": "Token secret"}):
+            async with APIClient(config, transport=transport) as client:
+                request = httpx.Request("GET", config.base_url)
+                request.extensions["openapi.generated_headers"] = list(request.headers.raw)
+                with self.assertRaisesRegex(ToolError, "withheld"):
+                    await client.send(request)
+
     async def test_concurrency_and_total_deadline_include_waiting(self):
         _, config = prepare(SPEC)
         active = peak = 0
