@@ -121,8 +121,10 @@ def contains_credentials(content: bytes, credentials: dict[str, str]) -> bool:
         decoded = text
     for name, value in credentials.items():
         secrets = [value]
-        if name == "authorization" and " " in value:
-            secrets.append(value.split(" ", 1)[1])
+        if name == "authorization":
+            parts = value.split(maxsplit=1)
+            if len(parts) == 2:
+                secrets.append(parts[1])
         for secret in secrets:
             if secret and any(candidate in text or candidate in decoded for candidate in (
                 secret, quote(secret, safe=""), json.dumps(secret, ensure_ascii=True)[1:-1],

@@ -183,6 +183,11 @@ class NetworkTests(unittest.IsolatedAsyncioTestCase):
         headers = {"authorization": "Bearer example-secret", "x-key": "key/value"}
         for content in (b'example-secret', b'{"x": "example\\u002dsecret"}', b'key%2Fvalue'):
             self.assertTrue(contains_credentials(content, headers))
+        for authorization in ("Bearer  example-secret", "Bearer\texample-secret"):
+            with self.subTest(authorization=authorization):
+                self.assertTrue(contains_credentials(
+                    b'example-secret', {"authorization": authorization},
+                ))
         self.assertFalse(contains_credentials(b'{"ok": true}', headers))
 
 
