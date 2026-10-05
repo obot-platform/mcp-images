@@ -36,6 +36,7 @@ on:
       - MMMCP_IMAGE
       - UV_IMAGE
       - http-webhook-mcp-converter/**
+      - openapi-mcp/**
       - mcp-servers/**
       - repackaging/**
       - repository-images.yaml
