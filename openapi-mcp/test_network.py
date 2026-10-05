@@ -155,6 +155,20 @@ class NetworkTests(unittest.IsolatedAsyncioTestCase):
                 await client.send(request)
             self.assertNotIn("secret-in-exception", str(error.exception))
 
+    async def test_percent_encoded_credential_echo_is_withheld(self):
+        _, config = prepare(SPEC, credential_headers="X-Key")
+        with patch("network.get_http_headers", return_value={"x-key": "key/value"}):
+            for echoed in (b'key%2fvalue', b'key%2f%76alue'):
+                with self.subTest(echoed=echoed):
+                    transport = httpx.MockTransport(lambda _: httpx.Response(
+                        200, stream=httpx.ByteStream(b'{"echo":"' + echoed + b'"}'),
+                    ))
+                    async with APIClient(config, transport=transport) as client:
+                        request = httpx.Request("GET", config.base_url)
+                        request.extensions["openapi.generated_headers"] = list(request.headers.raw)
+                        with self.assertRaisesRegex(ToolError, "withheld"):
+                            await client.send(request)
+
     async def test_concurrency_and_total_deadline_include_waiting(self):
         _, config = prepare(SPEC)
         active = peak = 0

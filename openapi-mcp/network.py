@@ -4,7 +4,7 @@ import asyncio
 import json
 import socket
 import ssl
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import httpcore
 import httpx
@@ -119,6 +119,8 @@ def contains_credentials(content: bytes, credentials: dict[str, str]) -> bool:
         decoded = json.dumps(json.loads(text), ensure_ascii=False)
     except (ValueError, RecursionError):
         decoded = text
+    # Percent escapes are case-insensitive and can encode only part of a secret.
+    percent_decoded = unquote(decoded)
     for name, value in credentials.items():
         secrets = [value]
         if name == "authorization":
@@ -126,9 +128,12 @@ def contains_credentials(content: bytes, credentials: dict[str, str]) -> bool:
             if len(parts) == 2:
                 secrets.append(parts[1])
         for secret in secrets:
-            if secret and any(candidate in text or candidate in decoded for candidate in (
-                secret, quote(secret, safe=""), json.dumps(secret, ensure_ascii=True)[1:-1],
-            )):
+            if not secret:
+                continue
+            candidates = (secret, quote(secret, safe=""), json.dumps(secret, ensure_ascii=True)[1:-1])
+            if secret in percent_decoded or any(
+                candidate in text or candidate in decoded for candidate in candidates
+            ):
                 return True
     return False
 
