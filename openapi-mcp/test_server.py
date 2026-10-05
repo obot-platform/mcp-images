@@ -203,6 +203,29 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(result.is_error, str(result))
                 self.assertIn("upstream-string", str(result))
 
+    async def test_authorization_parameter_is_hidden_and_upstream_error_is_returned(self):
+        spec = copy.deepcopy(SPEC)
+        spec["paths"]["/items/{id}"]["get"]["parameters"].append({
+            "name": "Authorization", "in": "header", "required": True,
+            "schema": {"type": "string"},
+        })
+        calls = []
+
+        def backend(request):
+            calls.append(request)
+            return response({"message": "authorization required"}, status=401)
+
+        document, config = prepare(spec)
+        async with APIClient(config, transport=httpx.MockTransport(backend)) as http:
+            async with Client(create_server(document, config, http)) as client:
+                tool = next(t for t in await client.list_tools() if t.name == "getItem")
+                self.assertNotIn("Authorization", tool.inputSchema.get("properties", {}))
+                result = await client.call_tool("getItem", {"id": "1"}, raise_on_error=False)
+                self.assertTrue(result.is_error)
+                self.assertIn("401", str(result))
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn("authorization", calls[0].headers)
+
     async def test_http_concurrent_credentials_health_and_cookie_isolation(self):
         calls = []
         both_started = asyncio.Event()

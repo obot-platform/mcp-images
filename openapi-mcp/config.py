@@ -198,7 +198,7 @@ def prepare(spec: dict, *, base_url: str | None = None,
                 parameter = resolve(parameter)
                 if parameter.get("in") == "header":
                     name = parameter.get("name", "").lower()
-                    if name in headers:
+                    if name == "authorization" or name in headers:
                         continue
                     if name in RESERVED_HEADERS or name.startswith(("mcp-", "proxy-", "sec-")):
                         raise ConfigError("Transport headers cannot be tool parameters")
