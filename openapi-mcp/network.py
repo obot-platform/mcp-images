@@ -114,7 +114,14 @@ def origin(url):
 
 
 def contains_credentials(content: bytes, credentials: dict[str, str]) -> bool:
-    text = content.decode("utf-8", errors="replace")
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        raise ToolError("Upstream response must be UTF-8 text") from None
+    # BOM-less UTF-16/32 can decode as UTF-8 with embedded NULs. FastMCP may
+    # later parse those bytes as JSON and expose a credential this scan missed.
+    if "\x00" in text:
+        raise ToolError("Upstream response must be UTF-8 text")
     try:
         decoded = json.dumps(json.loads(text), ensure_ascii=False)
     except (ValueError, RecursionError):

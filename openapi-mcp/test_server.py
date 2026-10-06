@@ -294,6 +294,28 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                         self.assertIn(message, str(result))
                         self.assertNotIn("test-credential", str(result))
 
+    async def test_non_utf8_credential_echoes_are_withheld(self):
+        document, config = prepare(SPEC, credential_headers="X-Key")
+        for encoding in ("utf-16", "utf-16-le", "utf-16-be",
+                         "utf-32", "utf-32-le", "utf-32-be"):
+            with self.subTest(encoding=encoding):
+                payload = '{"echo":"example-token"}'.encode(encoding)
+
+                def backend(request):
+                    self.assertEqual(request.headers["x-key"], "Token example-token")
+                    return httpx.Response(
+                        200, stream=httpx.ByteStream(payload),
+                        headers={"content-type": "application/json"},
+                    )
+
+                with patch("network.get_http_headers", return_value={"x-key": "Token example-token"}):
+                    async with APIClient(config, transport=httpx.MockTransport(backend)) as http:
+                        async with Client(create_server(document, config, http)) as client:
+                            result = await client.call_tool("getItem", {"id": "1"}, raise_on_error=False)
+                            self.assertTrue(result.is_error)
+                            self.assertIn("UTF-8", str(result))
+                            self.assertNotIn("example-token", str(result))
+
     def test_synchronous_conversion_timeout(self):
         with self.assertRaises(StartupTimeout), startup_deadline(0.01):
             while True:
