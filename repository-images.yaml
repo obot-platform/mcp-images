@@ -2,7 +2,6 @@ images:
   - name: openapi-mcp
     group: mcp-server
     catalog: false
-    version: "0.1.0"
     dockerfile: mcp-servers/Dockerfile.openapi-mcp
     paths:
       - openapi-mcp/config.py

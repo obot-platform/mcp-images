@@ -16,7 +16,7 @@ Images are divided into three families:
 - **Utilities** are unversioned images configured in `repository-images.yaml`,
   such as the STDIO wrapper and HTTP webhook converter.
 
-The [OpenAPI MCP wrapper](openapi-mcp/README.md) is a versioned repository image
+The [OpenAPI MCP wrapper](openapi-mcp/README.md) is a utility image
 that serves stored OpenAPI snapshots using FastMCP, with request-scoped
 credentials and direct tools for API operations.
 
