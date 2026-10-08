@@ -58,6 +58,27 @@ class RevisionTests(unittest.TestCase):
 
 
 class SelectionTests(unittest.TestCase):
+    def test_openapi_utility_owned_inputs(self):
+        root = Path(__file__).resolve().parents[1]
+        contents = (root / "repository-images.yaml").read_text()
+        entries = image_plan.manifest_entries(contents, "utility")
+        image = next(item["image"] for item in entries if item["image"]["name"] == "openapi-mcp")
+        self.assertNotIn("version", image)
+        self.assertFalse(image["catalog"])
+        owned = {image["dockerfile"], *image["paths"]}
+        for path in owned:
+            self.assertTrue((root / path).is_file(), path)
+            selected = image_plan.select_affected("utility", entries, entries, {path}, root=root)
+            self.assertEqual(self.names(selected), ["openapi-mcp"], path)
+        application_inputs = {
+            str(path.relative_to(root)) for path in (root / "openapi-mcp").rglob("*")
+            if path.is_file() and ".venv" not in path.parts and "__pycache__" not in path.parts
+            and not path.name.startswith(".")
+        }
+        self.assertTrue(application_inputs <= owned, application_inputs - owned)
+        self.assertEqual(image_plan.select_affected("utility", entries, entries, {"unrelated.txt"}, root=root), [])
+        self.assertNotIn("openapi-mcp", self.names(image_plan.manifest_entries(contents, "repository")))
+
     def setUp(self):
         self.repackages = [
             entry("repackage", "node-a", type="node", package="a", version="1"),

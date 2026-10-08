@@ -1,4 +1,23 @@
 images:
+  - name: openapi-mcp
+    group: mcp-server
+    catalog: false
+    dockerfile: mcp-servers/Dockerfile.openapi-mcp
+    paths:
+      - openapi-mcp/config.py
+      - openapi-mcp/network.py
+      - openapi-mcp/server.py
+      - openapi-mcp/pyproject.toml
+      - openapi-mcp/uv.lock
+      - openapi-mcp/test_config.py
+      - openapi-mcp/test_network.py
+      - openapi-mcp/test_server.py
+      - openapi-mcp/fixtures/api.json
+      - openapi-mcp/README.md
+    parents:
+      - arg: PYTHON_IMAGE
+        image: python:3.12-slim-bookworm
+
   - name: github
     group: mcp-server
     catalog: true
