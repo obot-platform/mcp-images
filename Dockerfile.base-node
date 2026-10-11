@@ -1,25 +1,26 @@
 FROM cgr.dev/chainguard/wolfi-base:latest
 
+LABEL org.opencontainers.image.source="https://github.com/obot-platform/mcp-images" \
+      org.opencontainers.image.description="Node.js base image for MCP servers"
+
 USER root
 
-RUN apk add make git nodejs npm pnpm
-
-RUN npm install -g npm && npm cache clean --force
-
-RUN mkdir -p /home/user/.npm && chown -R 1000:1000 "/home/user/.npm"
-
-# Setup chrome for things like Playwright
-RUN mkdir -p /opt/google/chrome && \
-    apk add chromium && \
-    ln -sf /usr/bin/chromium-browser /opt/google/chrome/chrome
-
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
-
-RUN mkdir -p /home/user/.local/bin && \
-chown -R 1000:0 /home/user && \
-chown -R 1000:0 /usr/local
+# Toolchain and Node in a single layer. The npm update must precede the
+# /usr/local chown so the upgraded npm ends up owned by uid 1000.
+RUN apk upgrade --no-cache && \
+    apk add --no-cache make git nodejs npm pnpm && \
+    npm install -g npm@12.0.2 && \
+    npm_root="$(npm root -g)" && \
+    npm pkg delete devDependencies --prefix "${npm_root}/npm" && \
+    npm install --prefix "${npm_root}/npm" --no-save --omit=dev \
+        --ignore-scripts --no-audit --no-fund \
+        brace-expansion@5.0.9 ip-address@10.3.1 tar@7.5.21 undici@6.28.0 && \
+    npm cache clean --force && \
+    mkdir -p /home/user/.npm /home/user/.local/bin && \
+    chown -R 1000:0 /home/user && \
+    chown -R 1000:0 /usr/local
 
 USER 1000
 
-ENV HOME=/home/user
-ENV PATH="/home/user/.local/bin:$PATH"
+ENV HOME=/home/user \
+    PATH="/home/user/.local/bin:$PATH"

@@ -2,130 +2,99 @@ images:
   - name: antv-charts
     type: node
     package: "@antv/mcp-server-chart"
-    version: 0.9.6
+    version: 0.9.10
   - name: aws-api
     type: python
     package: awslabs.aws-api-mcp-server
-    version: 1.2.2
-  - name: aws-cdk
-    type: python
-    package: awslabs.cdk-mcp-server
-    version: 1.0.10
+    version: 1.5.1
   - name: aws-documentation
     type: python
     package: awslabs.aws-documentation-mcp-server
-    version: 1.1.13
+    version: 1.1.30
   - name: aws-eks
     type: python
     package: awslabs.eks-mcp-server
-    version: 0.1.17
+    version: 0.1.37
   - name: aws-kendra
     type: python
     package: awslabs.amazon-kendra-index-mcp-server
-    version: 1.0.9
+    version: 1.0.21
   - name: aws-redshift
     type: python
     package: awslabs.redshift-mcp-server
-    version: 0.0.13
+    version: 0.0.34
   - name: azure
     type: node
     package: "@azure/mcp"
-    version: 1.0.1
+    version: 2.0.5
   - name: browserbase
     type: node
-    package: "@browserbasehq/mcp-server-browserbase"
-    version: 2.4.1
+    package: "@browserbasehq/mcp"
+    version: 3.0.0
+    npm_overrides:
+      undici: "6.28.1"
   - name: chroma
     type: python
     package: chroma-mcp
     version: 0.2.6
-  - name: context7
-    type: node
-    package: "@upstash/context7-mcp"
-    version: 1.0.31
-  - name: datadog
-    type: node
-    package: "@winor30/mcp-server-datadog"
-    version: 1.7.0
+    overrides:
+      - "mcp==1.29.1"
   - name: duckduckgo-search
     type: python
     package: duckduckgo-mcp-server
-    version: 0.1.1
-  - name: exa-search
-    type: node
-    package: exa-mcp-server
-    version: 3.1.3
-  - name: firecrawl
-    type: node
-    package: firecrawl-mcp
-    version: 3.6.2
-  - name: files-com
-    type: python
-    package: files-com-mcp
-    version: 1.0.40
+    version: 0.6.1
   - name: gitlab
     type: node
     package: "@zereight/mcp-gitlab"
-    version: 2.0.13
+    version: 2.1.52
   - name: ipgeolocation-io-mcp
     type: node
     package: ipgeolocation-io-mcp
-    version: 1.0.13
+    version: 2.0.1
   - name: grafana
     type: docker
-    package: "mcp/grafana"
-    version: latest
+    package: "grafana/mcp-grafana"
+    version: 1.5.1-alpine
   - name: mongodb-atlas
     type: node
     package: mongodb-mcp-server
-    version: 1.3.1
+    version: 2.1.0
   - name: mongodb-database
     type: node
     package: mongodb-mcp-server
-    version: 1.3.1
+    version: 2.1.0
   - name: mysql-mcp-server
     type: python
     package: mysql-mcp-server
-    version: 0.2.2
-  - name: pagerduty
-    type: python
-    package: pagerduty-mcp
-    version: 0.10.0
+    version: 0.4.4
   - name: playwright
-    type: node
-    package: "@playwright/mcp"
-    version: 0.0.52
+    type: docker
+    package: "mcr.microsoft.com/playwright/mcp"
+    version: v0.0.82
+    dockerfile: repackaging/Dockerfile.playwright
   - name: postgresql
     type: python
     package: postgres-mcp
     version: 0.3.0
-  - name: supabase
-    type: node
-    package: "@supabase/mcp-server-supabase"
-    version: 0.5.10
-  - name: digitalocean
-    type: node
-    package: "@digitalocean/mcp"
-    version: 1.0.30
+    constraints:
+      - "mcp<2"
   - name: markitdown-mcp
     type: python
     package: markitdown-mcp
     version: 0.0.1a4
     constraints:
       - "mammoth~=1.11.0"
+    overrides:
+      - "mcp==1.29.1"
   - name: brave-search
     type: node
     package: "@brave/brave-search-mcp-server"
-    version: 2.0.63
-  - name: dynatrace
-    type: node
-    package: "@dynatrace-oss/dynatrace-mcp-server"
-    version: 1.1.0
+    version: 2.1.3
   - name: redis
     type: python
     package: redis-mcp-server
-    version: 0.4.1
+    version: 0.5.1
   - name: terraform
     type: docker
     package: hashicorp/terraform-mcp-server
-    version: 0.3.3
+    version: 1.3.0
