@@ -337,6 +337,29 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(json.loads(result.content[0].text),
                                          {"status": status, "body": expected_body})
 
+    async def test_upstream_http_errors_with_serialization_expansion_omit_body(self):
+        document, config = prepare(SPEC)
+        for body in (b'\x01' * 100, b'[' + b'0,' * 32 + b'0]', b'x' * 90):
+            with self.subTest(body=body), patch("network.MAX_RESPONSE", 100):
+                responses = []
+
+                def backend(request):
+                    result = httpx.Response(500, stream=httpx.ByteStream(body))
+                    responses.append(result)
+                    return result
+
+                async with APIClient(config, transport=httpx.MockTransport(backend)) as http:
+                    async with Client(create_server(document, config, http)) as client:
+                        result = await client.call_tool("getItem", {"id": "1"}, raise_on_error=False)
+                        self.assertTrue(result.is_error)
+                        message = result.content[0].text
+                        self.assertLessEqual(len(message.encode("utf-8")), 100)
+                        payload = json.loads(message)
+                        self.assertEqual(payload["status"], 500)
+                        self.assertIn("Serialized", payload["error"])
+                        self.assertNotIn("body", payload)
+                self.assertTrue(responses[0].is_closed)
+
     async def test_upstream_http_error_bodies_are_checked_before_exposure(self):
         cases = (
             (b'{"echo":"test-credential"}', {}, "withheld"),

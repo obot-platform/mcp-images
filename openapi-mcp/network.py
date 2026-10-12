@@ -144,6 +144,37 @@ def contains_credentials(content: bytes, credentials: dict[str, str]) -> bool:
     return False
 
 
+def json_byte_sizes(value):
+    """Measure JSON with default separators without building escaped large strings."""
+    if isinstance(value, str):
+        yield 2  # Surrounding quotes.
+        for offset in range(0, len(value), 4096):
+            chunk = json.dumps(value[offset:offset + 4096], ensure_ascii=False)
+            yield len(chunk.encode("utf-8")) - 2
+    elif isinstance(value, dict):
+        yield 2 + max(0, len(value) - 1) * 2 + len(value) * 2
+        for key, item in value.items():
+            yield from json_byte_sizes(key)
+            yield from json_byte_sizes(item)
+    elif isinstance(value, list):
+        yield 2 + max(0, len(value) - 1) * 2
+        for item in value:
+            yield from json_byte_sizes(item)
+    else:
+        yield len(json.dumps(value, ensure_ascii=False, allow_nan=False).encode("utf-8"))
+
+
+def http_error_message(status, body):
+    payload = {"status": status, "body": body}
+    size = 0
+    for part in json_byte_sizes(payload):
+        size += part
+        if size > MAX_RESPONSE:
+            return json.dumps({"status": status, "error": "Serialized upstream error exceeds 10 MiB"},
+                              ensure_ascii=False)
+    return json.dumps(payload, ensure_ascii=False, allow_nan=False)
+
+
 class APIClient(httpx.AsyncClient):
     def __init__(self, config: Config, *, transport=None):
         self.api_transport = transport or CheckedTransport()
@@ -203,13 +234,11 @@ class APIClient(httpx.AsyncClient):
                     if error_status:
                         body = content.decode("utf-8")
                         try:
-                            message = json.dumps({"status": error_status, "body": json.loads(body)},
-                                                 ensure_ascii=False, allow_nan=False)
+                            message = http_error_message(error_status, json.loads(body))
                         except (ValueError, RecursionError):
                             # Preserve non-JSON bodies as strings; the outer error
                             # remains valid JSON even for malformed upstream JSON.
-                            message = json.dumps({"status": error_status, "body": body if body else None},
-                                                 ensure_ascii=False)
+                            message = http_error_message(error_status, body if body else None)
                         raise ToolError(message)
                     return httpx.Response(response.status_code, content=content, request=request,
                                           headers={"content-type": response.headers.get("content-type", "")})

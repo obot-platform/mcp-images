@@ -18,7 +18,7 @@ from fastmcp.exceptions import ToolError
 from httpcore._backends.auto import AutoBackend
 
 from config import prepare
-from network import APIClient, CheckedBackend, CheckedTransport, contains_credentials
+from network import APIClient, CheckedBackend, CheckedTransport, contains_credentials, http_error_message
 from test_config import SPEC
 
 
@@ -275,6 +275,40 @@ class NetworkTests(unittest.IsolatedAsyncioTestCase):
                     b'example-secret', {"authorization": authorization},
                 ))
         self.assertFalse(contains_credentials(b'{"ok": true}', headers))
+
+    def test_serialized_error_limit_includes_utf8_escaping_and_json_structure(self):
+        bodies = (
+            None, "", "plain text", "é😀\n\t\x01\\\"" * 1000,
+            {"escaped\nkey": [True, False, None, 1, -2, 1.25, {}, []]},
+            [0] * 100,
+        )
+        for body in bodies:
+            expected = json.dumps({"status": 500, "body": body}, ensure_ascii=False, allow_nan=False)
+            size = len(expected.encode("utf-8"))
+            with self.subTest(body_type=type(body).__name__), patch("network.MAX_RESPONSE", size):
+                self.assertEqual(http_error_message(500, body), expected)
+            with self.subTest(body_type=type(body).__name__, over_limit=True), \
+                 patch("network.MAX_RESPONSE", size - 1):
+                payload = json.loads(http_error_message(500, body))
+                self.assertEqual(payload["status"], 500)
+                self.assertIn("exceeds", payload["error"])
+                self.assertNotIn("body", payload)
+
+    def test_control_character_error_is_measured_in_bounded_chunks(self):
+        body = "\x01" * 10000
+        original_dumps = json.dumps
+
+        def checked_dumps(value, **kwargs):
+            if isinstance(value, str):
+                self.assertLessEqual(len(value), 4096)
+            elif isinstance(value, dict):
+                self.assertNotIn("body", value)
+            return original_dumps(value, **kwargs)
+
+        with patch("network.MAX_RESPONSE", 10000), patch("network.json.dumps", side_effect=checked_dumps):
+            message = http_error_message(500, body)
+        self.assertLessEqual(len(message.encode("utf-8")), 10000)
+        self.assertEqual(json.loads(message)["status"], 500)
 
 
 if __name__ == "__main__":
