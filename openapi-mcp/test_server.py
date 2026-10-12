@@ -251,7 +251,9 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                 for status in (401, 403):
                     result = await client.call_tool("getItem", {"id": "1"}, raise_on_error=False)
                     self.assertTrue(result.is_error)
-                    self.assertIn(str(status), str(result))
+                    self.assertEqual(json.loads(result.content[0].text), {
+                        "status": status, "body": {"message": "authorization required"},
+                    })
         self.assertEqual(len(calls), 2)
         for request in calls:
             self.assertNotIn("authorization", request.headers)
@@ -307,6 +309,62 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                     for header in ("X-Unwanted", "Cookie", "X-View", "Mcp-Session-Id"):
                         self.assertNotIn(header, request.headers)
                 self.assertFalse(http.cookies)
+
+    async def test_upstream_http_errors_include_response_body(self):
+        large_body = {"message": "Permission denied", "details": "x" * 9000}
+        cases = (
+            (403, b'{"message":"Permission denied","required_scope":"read:items"}',
+             {"message": "Permission denied", "required_scope": "read:items"}),
+            (400, b'[{"field":"id","message":"Invalid"}]', [{"field": "id", "message": "Invalid"}]),
+            (400, b'null', None),
+            (401, b'Invalid API key', "Invalid API key"),
+            (429, b'Rate limit exceeded', "Rate limit exceeded"),
+            (500, 'Service unavailable: réessayez'.encode("utf-8"), "Service unavailable: réessayez"),
+            (404, b'', None),
+            (500, b'{"message":"invalid JSON", "value":NaN}', '{"message":"invalid JSON", "value":NaN}'),
+            (403, json.dumps(large_body).encode("utf-8"), large_body),
+        )
+        document, config = prepare(SPEC)
+        for status, body, expected_body in cases:
+            with self.subTest(status=status):
+                def backend(request):
+                    return httpx.Response(status, stream=httpx.ByteStream(body))
+
+                async with APIClient(config, transport=httpx.MockTransport(backend)) as http:
+                    async with Client(create_server(document, config, http)) as client:
+                        result = await client.call_tool("getItem", {"id": "1"}, raise_on_error=False)
+                        self.assertTrue(result.is_error)
+                        self.assertEqual(json.loads(result.content[0].text),
+                                         {"status": status, "body": expected_body})
+
+    async def test_upstream_http_error_bodies_are_checked_before_exposure(self):
+        cases = (
+            (b'{"echo":"test-credential"}', {}, "withheld"),
+            (b'{"echo":"test%2dcredential"}', {}, "withheld"),
+            (b'{"echo":"test\\u002dcredential"}', {}, "withheld"),
+            (b'\xffprivate', {}, "UTF-8"),
+            ('private'.encode("utf-16-le"), {}, "UTF-8"),
+            (b'private', {"content-encoding": "gzip"}, "identity"),
+            (b'private' * 100, {}, "exceeds"),
+        )
+        document, config = prepare(SPEC, credential_headers="Authorization")
+        for body, headers, expected in cases:
+            with self.subTest(expected=expected), \
+                 patch("network.get_http_headers", return_value={"authorization": "Bearer test-credential"}), \
+                 patch("network.MAX_RESPONSE", 100):
+                def backend(request):
+                    return httpx.Response(403, stream=httpx.ByteStream(body), headers=headers)
+
+                async with APIClient(config, transport=httpx.MockTransport(backend)) as http:
+                    async with Client(create_server(document, config, http)) as client:
+                        result = await client.call_tool("getItem", {"id": "1"}, raise_on_error=False)
+                        self.assertTrue(result.is_error)
+                        payload = json.loads(result.content[0].text)
+                        self.assertEqual(payload["status"], 403)
+                        self.assertIn(expected, payload["error"])
+                        self.assertNotIn("body", payload)
+                        self.assertNotIn("test-credential", str(result))
+                        self.assertNotIn("private", str(result))
 
     async def test_upstream_failures_limits_and_echoes(self):
         async def slow(request):

@@ -183,18 +183,34 @@ class APIClient(httpx.AsyncClient):
                 try:
                     if 300 <= response.status_code < 400:
                         raise ToolError("Upstream redirects are disabled")
-                    if response.status_code >= 400:
-                        raise ToolError(f"Upstream API returned HTTP {response.status_code}")
-                    if response.headers.get("content-encoding", "identity").lower() != "identity":
-                        raise ToolError("Upstream must honor Accept-Encoding: identity")
-                    chunks = bytearray()
-                    async for chunk in response.aiter_raw():
-                        if len(chunks) + len(chunk) > MAX_RESPONSE:
-                            raise ToolError("Upstream response exceeds 10 MiB")
-                        chunks.extend(chunk)
-                    content = bytes(chunks)
-                    if contains_credentials(content, credentials):
-                        raise ToolError("Upstream response contained a credential and was withheld")
+                    error_status = response.status_code if response.status_code >= 400 else None
+                    try:
+                        if response.headers.get("content-encoding", "identity").lower() != "identity":
+                            raise ToolError("Upstream must honor Accept-Encoding: identity")
+                        chunks = bytearray()
+                        async for chunk in response.aiter_raw():
+                            if len(chunks) + len(chunk) > MAX_RESPONSE:
+                                raise ToolError("Upstream response exceeds 10 MiB")
+                            chunks.extend(chunk)
+                        content = bytes(chunks)
+                        if contains_credentials(content, credentials):
+                            raise ToolError("Upstream response contained a credential and was withheld")
+                    except ToolError as error:
+                        if error_status:
+                            raise ToolError(json.dumps({"status": error_status, "error": str(error)},
+                                                       ensure_ascii=False)) from None
+                        raise
+                    if error_status:
+                        body = content.decode("utf-8")
+                        try:
+                            message = json.dumps({"status": error_status, "body": json.loads(body)},
+                                                 ensure_ascii=False, allow_nan=False)
+                        except (ValueError, RecursionError):
+                            # Preserve non-JSON bodies as strings; the outer error
+                            # remains valid JSON even for malformed upstream JSON.
+                            message = json.dumps({"status": error_status, "body": body if body else None},
+                                                 ensure_ascii=False)
+                        raise ToolError(message)
                     return httpx.Response(response.status_code, content=content, request=request,
                                           headers={"content-type": response.headers.get("content-type", "")})
                 finally:

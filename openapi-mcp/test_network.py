@@ -1,4 +1,5 @@
 import asyncio
+import json
 import socket
 import ssl
 import tempfile
@@ -210,6 +211,35 @@ class NetworkTests(unittest.IsolatedAsyncioTestCase):
                 request.extensions["openapi.generated_headers"] = list(request.headers.raw)
                 with self.assertRaisesRegex(ToolError, "withheld"):
                     await client.send(request)
+
+    async def test_http_error_body_is_complete_checked_and_stream_closed(self):
+        _, config = prepare(SPEC, credential_headers="X-Key")
+        for body, withheld in ((json.dumps({"message": "Permission denied", "details": "x" * 9000}).encode(), False),
+                               (b'x' * 9000 + b'late-secret', True)):
+            with self.subTest(withheld=withheld), \
+                 patch("network.get_http_headers", return_value={"x-key": "late-secret"}):
+                responses = []
+
+                def backend(request):
+                    result = httpx.Response(403, stream=httpx.ByteStream(body))
+                    responses.append(result)
+                    return result
+
+                async with APIClient(config, transport=httpx.MockTransport(backend)) as client:
+                    request = httpx.Request("GET", config.base_url)
+                    request.extensions["openapi.generated_headers"] = list(request.headers.raw)
+                    with self.assertRaises(ToolError) as error:
+                        await client.send(request)
+                message = str(error.exception)
+                payload = json.loads(message)
+                self.assertEqual(payload["status"], 403)
+                self.assertNotIn("late-secret", message)
+                if withheld:
+                    self.assertIn("withheld", payload["error"])
+                    self.assertNotIn("body", payload)
+                else:
+                    self.assertEqual(payload["body"], json.loads(body))
+                self.assertTrue(responses[0].is_closed)
 
     async def test_concurrency_and_total_deadline_include_waiting(self):
         _, config = prepare(SPEC)

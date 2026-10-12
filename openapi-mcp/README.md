@@ -19,6 +19,12 @@ empty, or whitespace-only values are omitted. OpenAPI security declarations do n
 require corresponding header configuration or prevent anonymous requests. The
 upstream API decides whether authentication is needed; HTTP 401 and 403 responses
 are returned as tool errors.
+HTTP errors retain `isError: true` and include a JSON object in MCP text content,
+such as `{"status":403,"body":{"message":"Permission denied"}}`. JSON bodies are
+parsed and included in full; non-JSON UTF-8 bodies are strings and empty bodies
+are `null`. Error responses undergo the same encoding, 10 MiB size limit, and
+credential checks as successful responses. Unsafe bodies are omitted; the JSON
+object contains `status` and an `error` reason instead.
 The wrapper exposes generated API operations directly as MCP tools.
 
 API requests may connect only to public IP addresses. The wrapper checks DNS
