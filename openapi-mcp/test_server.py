@@ -185,6 +185,32 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                     await client.call_tool("createItem", {"title": "hello"})
                     self.assertEqual(json.loads(calls[-1].content), {"title": "hello"})
 
+    async def test_security_declarations_allow_anonymous_tool_calls(self):
+        for version in ("3.0.4", "3.1.2"):
+            for scheme in ({"type": "apiKey", "in": "header", "name": "X-Key"},
+                           {"type": "http", "scheme": "bearer"}):
+                for headers in ("", "Authorization, X-Key"):
+                    with self.subTest(version=version, scheme=scheme, headers=headers):
+                        spec = copy.deepcopy(SPEC)
+                        spec["openapi"] = version
+                        spec["components"] = {"securitySchemes": {"auth": scheme}}
+                        spec["security"] = [{"auth": []}]
+                        spec["paths"]["/items/{id}"]["get"]["security"] = [{"auth": []}]
+                        calls = []
+
+                        def backend(request):
+                            calls.append(request)
+                            return response({"ok": True})
+
+                        document, config = prepare(spec, credential_headers=headers)
+                        async with APIClient(config, transport=httpx.MockTransport(backend)) as http:
+                            async with Client(create_server(document, config, http)) as client:
+                                result = await client.call_tool("getItem", {"id": "1"}, raise_on_error=False)
+                                self.assertFalse(result.is_error, str(result))
+                        self.assertEqual(len(calls), 1)
+                        self.assertNotIn("authorization", calls[0].headers)
+                        self.assertNotIn("x-key", calls[0].headers)
+
     async def test_upstream_response_does_not_require_matching_openapi_output_schema(self):
         spec = copy.deepcopy(SPEC)
         spec["paths"]["/items/{id}"]["get"]["responses"]["200"]["content"] = {
@@ -211,20 +237,24 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         })
         calls = []
 
+        status = 401
+
         def backend(request):
             calls.append(request)
-            return response({"message": "authorization required"}, status=401)
+            return response({"message": "authorization required"}, status=status)
 
-        document, config = prepare(spec)
+        document, config = prepare(spec, credential_headers="Authorization")
         async with APIClient(config, transport=httpx.MockTransport(backend)) as http:
             async with Client(create_server(document, config, http)) as client:
                 tool = next(t for t in await client.list_tools() if t.name == "getItem")
                 self.assertNotIn("Authorization", tool.inputSchema.get("properties", {}))
-                result = await client.call_tool("getItem", {"id": "1"}, raise_on_error=False)
-                self.assertTrue(result.is_error)
-                self.assertIn("401", str(result))
-        self.assertEqual(len(calls), 1)
-        self.assertNotIn("authorization", calls[0].headers)
+                for status in (401, 403):
+                    result = await client.call_tool("getItem", {"id": "1"}, raise_on_error=False)
+                    self.assertTrue(result.is_error)
+                    self.assertIn(str(status), str(result))
+        self.assertEqual(len(calls), 2)
+        for request in calls:
+            self.assertNotIn("authorization", request.headers)
 
     async def test_http_concurrent_credentials_health_and_cookie_isolation(self):
         calls = []
@@ -245,28 +275,35 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual((await health.get(url + "/healthz")).json(), {"status": "ok"})
                     self.assertEqual((await health.get(url + "/readyz")).json(), {"status": "ok"})
 
-                async def user(key, missing=False):
-                    headers = {"Authorization": f"Bearer {key}", "X-Key": key,
-                               "X-Unwanted": "login-token", "Cookie": "session=client",
-                               "X-View": "incoming-not-an-argument"}
-                    if missing:
-                        del headers["X-Key"]
+                async def user(key, credentials):
+                    headers = {"X-Unwanted": "login-token", "Cookie": "session=client",
+                               "X-View": "incoming-not-an-argument", **credentials}
                     async with Client(StreamableHttpTransport(url + "/mcp", headers=headers)) as client:
                         tools = await client.list_tools()
                         self.assertNotIn(key, str(tools))
                         return await client.call_tool("getItem", {"id": key}, raise_on_error=False)
 
-                results = await asyncio.gather(user("user-a-secret"), user("user-b-secret"))
+                results = await asyncio.gather(
+                    user("user-a-secret", {"Authorization": "Bearer user-a-secret", "X-Key": "user-a-secret"}),
+                    user("user-b-secret", {"Authorization": "Bearer user-b-secret", "X-Key": "user-b-secret"}),
+                    user("anonymous", {}),
+                )
                 self.assertTrue(all(not r.is_error for r in results))
-                missing = await user("missing-secret", missing=True)
-                self.assertTrue(missing.is_error)
-                self.assertEqual(len(calls), 2)
-                await user("user-c-secret")
-                self.assertEqual(len(calls), 3)
+                partial = await user("partial-secret", {"Authorization": "Bearer partial-secret"})
+                self.assertFalse(partial.is_error, str(partial))
+                complete = await user("user-c-secret", {"Authorization": "Bearer user-c-secret", "X-Key": "user-c-secret"})
+                self.assertFalse(complete.is_error, str(complete))
+                self.assertEqual(len(calls), 5)
                 for request in calls:
                     key = request.url.path.rsplit("/", 1)[1]
-                    self.assertEqual(request.headers["Authorization"], f"Bearer {key}")
-                    self.assertEqual(request.headers["X-Key"], key)
+                    if key == "anonymous":
+                        self.assertNotIn("Authorization", request.headers)
+                    else:
+                        self.assertEqual(request.headers["Authorization"], f"Bearer {key}")
+                    if key in ("anonymous", "partial-secret"):
+                        self.assertNotIn("X-Key", request.headers)
+                    else:
+                        self.assertEqual(request.headers["X-Key"], key)
                     for header in ("X-Unwanted", "Cookie", "X-View", "Mcp-Session-Id"):
                         self.assertNotIn(header, request.headers)
                 self.assertFalse(http.cookies)

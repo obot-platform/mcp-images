@@ -162,10 +162,12 @@ class APIClient(httpx.AsyncClient):
             raise ToolError("Missing generated request metadata")
         incoming = get_http_headers(include_all=True)
         credentials = {}
+        # Obot owns credential requiredness; the upstream API decides whether
+        # requests without credentials are authorized.
         for name in self.config.credential_headers:
             value = incoming.get(name)
             if not value or not value.strip():
-                raise ToolError(f"Missing required credential header: {name}")
+                continue
             credentials[name] = value
         request.headers = httpx.Headers(generated)
         for name in ("cookie", "authorization", *self.config.credential_headers):

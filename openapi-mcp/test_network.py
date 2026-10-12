@@ -145,6 +145,33 @@ class NetworkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(received[0]["x-key"], "real-secret")
         self.assertNotIn("x-tool", received[0])
 
+    async def test_missing_or_blank_credentials_do_not_restore_generated_values(self):
+        _, config = prepare(SPEC, credential_headers="Authorization, X-Key")
+        for value in (None, "", " \t "):
+            with self.subTest(value=value):
+                incoming = {"x-key": "Token supplied-secret", "x-unwanted": "private"}
+                if value is not None:
+                    incoming["authorization"] = value
+                received = []
+
+                def backend(request):
+                    received.append(request)
+                    return httpx.Response(200, stream=httpx.ByteStream(b'{"ok":true}'))
+
+                with patch("network.get_http_headers", return_value=incoming):
+                    async with APIClient(config, transport=httpx.MockTransport(backend)) as client:
+                        request = httpx.Request("GET", config.base_url, headers={
+                            "authorization": "Bearer generated-secret", "x-key": "generated",
+                        })
+                        request.extensions["openapi.generated_headers"] = list(request.headers.raw)
+                        request.headers["x-unwanted"] = "private"
+                        result = await client.send(request)
+                        self.assertEqual(result.json(), {"ok": True})
+                self.assertEqual(len(received), 1)
+                self.assertNotIn("authorization", received[0].headers)
+                self.assertNotIn("x-unwanted", received[0].headers)
+                self.assertEqual(received[0].headers["x-key"], "Token supplied-secret")
+
     async def test_network_exceptions_are_sanitized(self):
         _, config = prepare(SPEC)
         handler = AsyncMock(side_effect=RuntimeError("secret-in-exception"))
