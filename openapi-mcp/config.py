@@ -142,7 +142,7 @@ def prepare(spec: dict, *, base_url: str | None = None,
         while isinstance(node, dict) and "$ref" in node:
             ref = node["$ref"]
             if ref in seen:
-                raise ConfigError("Cyclic parameter or security references are unsupported")
+                raise ConfigError("Cyclic parameter references are unsupported")
             seen.add(ref)
             node = reference(ref)
         return node
