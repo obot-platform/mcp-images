@@ -18,7 +18,7 @@ from fastmcp.exceptions import ToolError
 from httpcore._backends.auto import AutoBackend
 
 from config import prepare
-from network import APIClient, CheckedBackend, CheckedTransport, contains_credentials, http_error_message
+from network import APIClient, CheckedBackend, CheckedTransport
 from test_config import SPEC
 
 
@@ -183,40 +183,11 @@ class NetworkTests(unittest.IsolatedAsyncioTestCase):
                 await client.send(request)
             self.assertNotIn("secret-in-exception", str(error.exception))
 
-    async def test_percent_encoded_credential_echo_is_withheld(self):
+    async def test_http_error_body_is_complete_and_stream_closed(self):
         _, config = prepare(SPEC, credential_headers="X-Key")
-        with patch("network.get_http_headers", return_value={"x-key": "key/value"}):
-            for echoed in (b'key%2fvalue', b'key%2f%76alue'):
-                with self.subTest(echoed=echoed):
-                    transport = httpx.MockTransport(lambda _: httpx.Response(
-                        200, stream=httpx.ByteStream(b'{"echo":"' + echoed + b'"}'),
-                    ))
-                    async with APIClient(config, transport=transport) as client:
-                        request = httpx.Request("GET", config.base_url)
-                        request.extensions["openapi.generated_headers"] = list(request.headers.raw)
-                        with self.assertRaisesRegex(ToolError, "withheld"):
-                            await client.send(request)
-
-    async def test_prefixed_non_authorization_credential_echo_is_withheld(self):
-        _, config = prepare(SPEC, credential_headers="X-Key")
-
-        def backend(request):
-            self.assertEqual(request.headers["x-key"], "Token secret")
-            return httpx.Response(200, stream=httpx.ByteStream(b'{"echo":"secret"}'))
-
-        transport = httpx.MockTransport(backend)
-        with patch("network.get_http_headers", return_value={"x-key": "Token secret"}):
-            async with APIClient(config, transport=transport) as client:
-                request = httpx.Request("GET", config.base_url)
-                request.extensions["openapi.generated_headers"] = list(request.headers.raw)
-                with self.assertRaisesRegex(ToolError, "withheld"):
-                    await client.send(request)
-
-    async def test_http_error_body_is_complete_checked_and_stream_closed(self):
-        _, config = prepare(SPEC, credential_headers="X-Key")
-        for body, withheld in ((json.dumps({"message": "Permission denied", "details": "x" * 9000}).encode(), False),
-                               (b'x' * 9000 + b'late-secret', True)):
-            with self.subTest(withheld=withheld), \
+        for body in (json.dumps({"message": "Permission denied", "details": "x" * 9000}).encode(),
+                     b'x' * 9000 + b'late-secret'):
+            with self.subTest(body=body[:40]), \
                  patch("network.get_http_headers", return_value={"x-key": "late-secret"}):
                 responses = []
 
@@ -233,12 +204,33 @@ class NetworkTests(unittest.IsolatedAsyncioTestCase):
                 message = str(error.exception)
                 payload = json.loads(message)
                 self.assertEqual(payload["status"], 403)
-                self.assertNotIn("late-secret", message)
-                if withheld:
-                    self.assertIn("withheld", payload["error"])
-                    self.assertNotIn("body", payload)
-                else:
-                    self.assertEqual(payload["body"], json.loads(body))
+                expected = json.loads(body) if body.startswith(b'{') else body.decode("utf-8")
+                self.assertEqual(payload["body"], expected)
+                self.assertTrue(responses[0].is_closed)
+
+    async def test_responses_over_ten_mib_are_returned_in_full(self):
+        _, config = prepare(SPEC)
+        body = b'x' * (10 * 1024 * 1024 + 1)
+        for status in (200, 500):
+            with self.subTest(status=status):
+                responses = []
+
+                def backend(request):
+                    result = httpx.Response(status, stream=httpx.ByteStream(body))
+                    responses.append(result)
+                    return result
+
+                async with APIClient(config, transport=httpx.MockTransport(backend)) as client:
+                    request = httpx.Request("GET", config.base_url)
+                    request.extensions["openapi.generated_headers"] = list(request.headers.raw)
+                    if status == 200:
+                        result = await client.send(request)
+                        self.assertEqual(result.content, body)
+                    else:
+                        with self.assertRaises(ToolError) as error:
+                            await client.send(request)
+                        payload = json.loads(str(error.exception))
+                        self.assertEqual(payload, {"status": status, "body": body.decode("utf-8")})
                 self.assertTrue(responses[0].is_closed)
 
     async def test_concurrency_and_total_deadline_include_waiting(self):
@@ -264,51 +256,6 @@ class NetworkTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.gather(*(send() for _ in range(5)))
         self.assertEqual(peak, 2)
         self.assertEqual(active, 0)
-
-    def test_credential_echo_variants(self):
-        headers = {"authorization": "Bearer example-secret", "x-key": "key/value"}
-        for content in (b'example-secret', b'{"x": "example\\u002dsecret"}', b'key%2Fvalue'):
-            self.assertTrue(contains_credentials(content, headers))
-        for authorization in ("Bearer  example-secret", "Bearer\texample-secret"):
-            with self.subTest(authorization=authorization):
-                self.assertTrue(contains_credentials(
-                    b'example-secret', {"authorization": authorization},
-                ))
-        self.assertFalse(contains_credentials(b'{"ok": true}', headers))
-
-    def test_serialized_error_limit_includes_utf8_escaping_and_json_structure(self):
-        bodies = (
-            None, "", "plain text", "é😀\n\t\x01\\\"" * 1000,
-            {"escaped\nkey": [True, False, None, 1, -2, 1.25, {}, []]},
-            [0] * 100,
-        )
-        for body in bodies:
-            expected = json.dumps({"status": 500, "body": body}, ensure_ascii=False, allow_nan=False)
-            size = len(expected.encode("utf-8"))
-            with self.subTest(body_type=type(body).__name__), patch("network.MAX_RESPONSE", size):
-                self.assertEqual(http_error_message(500, body), expected)
-            with self.subTest(body_type=type(body).__name__, over_limit=True), \
-                 patch("network.MAX_RESPONSE", size - 1):
-                payload = json.loads(http_error_message(500, body))
-                self.assertEqual(payload["status"], 500)
-                self.assertIn("exceeds", payload["error"])
-                self.assertNotIn("body", payload)
-
-    def test_control_character_error_is_measured_in_bounded_chunks(self):
-        body = "\x01" * 10000
-        original_dumps = json.dumps
-
-        def checked_dumps(value, **kwargs):
-            if isinstance(value, str):
-                self.assertLessEqual(len(value), 4096)
-            elif isinstance(value, dict):
-                self.assertNotIn("body", value)
-            return original_dumps(value, **kwargs)
-
-        with patch("network.MAX_RESPONSE", 10000), patch("network.json.dumps", side_effect=checked_dumps):
-            message = http_error_message(500, body)
-        self.assertLessEqual(len(message.encode("utf-8")), 10000)
-        self.assertEqual(json.loads(message)["status"], 500)
 
 
 if __name__ == "__main__":

@@ -310,6 +310,33 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                         self.assertNotIn(header, request.headers)
                 self.assertFalse(http.cookies)
 
+    async def test_upstream_credential_echoes_are_returned(self):
+        document, config = prepare(SPEC, credential_headers="Authorization, X-Key")
+        bodies = (
+            b'{"echo":"Bearer test-credential"}',
+            b'{"echo":"test-credential"}',
+            b'{"echo":"test\\u002dcredential"}',
+            b'{"echo":"key%2f%76alue"}',
+        )
+        for status in (200, 403):
+            for body in bodies:
+                with self.subTest(status=status, body=body), patch("network.get_http_headers", return_value={
+                    "authorization": "Bearer test-credential", "x-key": "Token key/value",
+                }):
+                    def backend(request):
+                        self.assertEqual(request.headers["authorization"], "Bearer test-credential")
+                        self.assertEqual(request.headers["x-key"], "Token key/value")
+                        return httpx.Response(status, stream=httpx.ByteStream(body))
+
+                    async with APIClient(config, transport=httpx.MockTransport(backend)) as http:
+                        async with Client(create_server(document, config, http)) as client:
+                            result = await client.call_tool("getItem", {"id": "1"}, raise_on_error=False)
+                            self.assertEqual(result.is_error, status >= 400)
+                            expected = json.loads(body)
+                            if status >= 400:
+                                expected = {"status": status, "body": expected}
+                            self.assertEqual(json.loads(result.content[0].text), expected)
+
     async def test_upstream_http_errors_include_response_body(self):
         large_body = {"message": "Permission denied", "details": "x" * 9000}
         cases = (
@@ -322,6 +349,9 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             (500, 'Service unavailable: réessayez'.encode("utf-8"), "Service unavailable: réessayez"),
             (404, b'', None),
             (500, b'{"message":"invalid JSON", "value":NaN}', '{"message":"invalid JSON", "value":NaN}'),
+            (500, b'{"message":"\\ud800"}', '{"message":"\\ud800"}'),
+            (500, b'{"message":"\\udfff"}', '{"message":"\\udfff"}'),
+            (500, b'{"\\ud800":"value"}', '{"\\ud800":"value"}'),
             (403, json.dumps(large_body).encode("utf-8"), large_body),
         )
         document, config = prepare(SPEC)
@@ -337,10 +367,10 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(json.loads(result.content[0].text),
                                          {"status": status, "body": expected_body})
 
-    async def test_upstream_http_errors_with_serialization_expansion_omit_body(self):
+    async def test_upstream_http_errors_preserve_escaped_control_characters(self):
         document, config = prepare(SPEC)
         for body in (b'\x01' * 100, b'[' + b'0,' * 32 + b'0]', b'x' * 90):
-            with self.subTest(body=body), patch("network.MAX_RESPONSE", 100):
+            with self.subTest(body=body):
                 responses = []
 
                 def backend(request):
@@ -353,28 +383,22 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                         result = await client.call_tool("getItem", {"id": "1"}, raise_on_error=False)
                         self.assertTrue(result.is_error)
                         message = result.content[0].text
-                        self.assertLessEqual(len(message.encode("utf-8")), 100)
                         payload = json.loads(message)
                         self.assertEqual(payload["status"], 500)
-                        self.assertIn("Serialized", payload["error"])
-                        self.assertNotIn("body", payload)
+                        expected = json.loads(body) if body.startswith(b'[') else body.decode("utf-8")
+                        self.assertEqual(payload["body"], expected)
                 self.assertTrue(responses[0].is_closed)
 
-    async def test_upstream_http_error_bodies_are_checked_before_exposure(self):
+    async def test_upstream_http_error_bodies_require_supported_encodings(self):
         cases = (
-            (b'{"echo":"test-credential"}', {}, "withheld"),
-            (b'{"echo":"test%2dcredential"}', {}, "withheld"),
-            (b'{"echo":"test\\u002dcredential"}', {}, "withheld"),
             (b'\xffprivate', {}, "UTF-8"),
             ('private'.encode("utf-16-le"), {}, "UTF-8"),
             (b'private', {"content-encoding": "gzip"}, "identity"),
-            (b'private' * 100, {}, "exceeds"),
         )
         document, config = prepare(SPEC, credential_headers="Authorization")
         for body, headers, expected in cases:
             with self.subTest(expected=expected), \
-                 patch("network.get_http_headers", return_value={"authorization": "Bearer test-credential"}), \
-                 patch("network.MAX_RESPONSE", 100):
+                 patch("network.get_http_headers", return_value={"authorization": "Bearer test-credential"}):
                 def backend(request):
                     return httpx.Response(403, stream=httpx.ByteStream(body), headers=headers)
 
@@ -389,22 +413,19 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                         self.assertNotIn("test-credential", str(result))
                         self.assertNotIn("private", str(result))
 
-    async def test_upstream_failures_limits_and_echoes(self):
+    async def test_upstream_redirects_encoding_and_timeout(self):
         async def slow(request):
             await asyncio.sleep(1)
             return response({})
 
         cases = [
-            (lambda _: response({"secret": "test-credential"}, 401), "401"),
             (lambda _: response({}, 302, location="https://other.test"), "redirect"),
-            (lambda _: response({"secret": "test-credential"}), "withheld"),
-            (lambda _: response({"secret": "test-credential" * 100}), "exceeds"),
             (lambda _: response({}, **{"content-encoding": "gzip"}), "identity"),
             (slow, "timed out"),
         ]
         document, config = prepare(SPEC, credential_headers="Authorization")
         for backend, message in cases:
-            with self.subTest(message=message), patch("network.get_http_headers", return_value={"authorization": "Bearer test-credential"}), patch("network.MAX_RESPONSE", 100), patch("network.REQUEST_TIMEOUT", 0.05):
+            with self.subTest(message=message), patch("network.get_http_headers", return_value={"authorization": "Bearer test-credential"}), patch("network.REQUEST_TIMEOUT", 0.05):
                 async with APIClient(config, transport=httpx.MockTransport(backend)) as http:
                     async with Client(create_server(document, config, http)) as client:
                         result = await client.call_tool("getItem", {"id": "1"}, raise_on_error=False)
@@ -412,7 +433,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                         self.assertIn(message, str(result))
                         self.assertNotIn("test-credential", str(result))
 
-    async def test_non_utf8_credential_echoes_are_withheld(self):
+    async def test_non_utf8_responses_are_rejected(self):
         document, config = prepare(SPEC, credential_headers="X-Key")
         for encoding in ("utf-16", "utf-16-le", "utf-16-be",
                          "utf-32", "utf-32-le", "utf-32-be"):

@@ -22,11 +22,10 @@ are returned as tool errors.
 HTTP errors retain `isError: true` and include a JSON object in MCP text content,
 such as `{"status":403,"body":{"message":"Permission denied"}}`. JSON bodies are
 parsed and included in full; non-JSON UTF-8 bodies are strings and empty bodies
-are `null`. Error responses undergo the same encoding, 10 MiB size limit, and
-credential checks as successful responses. Unsafe bodies are omitted; the JSON
-object contains `status` and an `error` reason instead. The serialized error text
-is also limited to 10 MiB; bodies that would exceed that limit after JSON
-escaping are omitted with an error reason.
+are `null`. Responses must use UTF-8 text and identity content encoding. Error
+responses with unsupported encodings omit the body and include `status` and an
+`error` reason instead. Responses are buffered in full without a size limit,
+and response bodies are returned even when they contain forwarded credentials.
 The wrapper exposes generated API operations directly as MCP tools.
 
 API requests may connect only to public IP addresses. The wrapper checks DNS
