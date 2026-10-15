@@ -1,4 +1,5 @@
 import asyncio
+import json
 import socket
 import ssl
 import tempfile
@@ -17,7 +18,7 @@ from fastmcp.exceptions import ToolError
 from httpcore._backends.auto import AutoBackend
 
 from config import prepare
-from network import APIClient, CheckedBackend, CheckedTransport, contains_credentials
+from network import APIClient, CheckedBackend, CheckedTransport
 from test_config import SPEC
 
 
@@ -145,6 +146,33 @@ class NetworkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(received[0]["x-key"], "real-secret")
         self.assertNotIn("x-tool", received[0])
 
+    async def test_missing_or_blank_credentials_do_not_restore_generated_values(self):
+        _, config = prepare(SPEC, credential_headers="Authorization, X-Key")
+        for value in (None, "", " \t "):
+            with self.subTest(value=value):
+                incoming = {"x-key": "Token supplied-secret", "x-unwanted": "private"}
+                if value is not None:
+                    incoming["authorization"] = value
+                received = []
+
+                def backend(request):
+                    received.append(request)
+                    return httpx.Response(200, stream=httpx.ByteStream(b'{"ok":true}'))
+
+                with patch("network.get_http_headers", return_value=incoming):
+                    async with APIClient(config, transport=httpx.MockTransport(backend)) as client:
+                        request = httpx.Request("GET", config.base_url, headers={
+                            "authorization": "Bearer generated-secret", "x-key": "generated",
+                        })
+                        request.extensions["openapi.generated_headers"] = list(request.headers.raw)
+                        request.headers["x-unwanted"] = "private"
+                        result = await client.send(request)
+                        self.assertEqual(result.json(), {"ok": True})
+                self.assertEqual(len(received), 1)
+                self.assertNotIn("authorization", received[0].headers)
+                self.assertNotIn("x-unwanted", received[0].headers)
+                self.assertEqual(received[0].headers["x-key"], "Token supplied-secret")
+
     async def test_network_exceptions_are_sanitized(self):
         _, config = prepare(SPEC)
         handler = AsyncMock(side_effect=RuntimeError("secret-in-exception"))
@@ -155,34 +183,55 @@ class NetworkTests(unittest.IsolatedAsyncioTestCase):
                 await client.send(request)
             self.assertNotIn("secret-in-exception", str(error.exception))
 
-    async def test_percent_encoded_credential_echo_is_withheld(self):
+    async def test_http_error_body_is_complete_and_stream_closed(self):
         _, config = prepare(SPEC, credential_headers="X-Key")
-        with patch("network.get_http_headers", return_value={"x-key": "key/value"}):
-            for echoed in (b'key%2fvalue', b'key%2f%76alue'):
-                with self.subTest(echoed=echoed):
-                    transport = httpx.MockTransport(lambda _: httpx.Response(
-                        200, stream=httpx.ByteStream(b'{"echo":"' + echoed + b'"}'),
-                    ))
-                    async with APIClient(config, transport=transport) as client:
-                        request = httpx.Request("GET", config.base_url)
-                        request.extensions["openapi.generated_headers"] = list(request.headers.raw)
-                        with self.assertRaisesRegex(ToolError, "withheld"):
+        for body in (json.dumps({"message": "Permission denied", "details": "x" * 9000}).encode(),
+                     b'x' * 9000 + b'late-secret'):
+            with self.subTest(body=body[:40]), \
+                 patch("network.get_http_headers", return_value={"x-key": "late-secret"}):
+                responses = []
+
+                def backend(request):
+                    result = httpx.Response(403, stream=httpx.ByteStream(body))
+                    responses.append(result)
+                    return result
+
+                async with APIClient(config, transport=httpx.MockTransport(backend)) as client:
+                    request = httpx.Request("GET", config.base_url)
+                    request.extensions["openapi.generated_headers"] = list(request.headers.raw)
+                    with self.assertRaises(ToolError) as error:
+                        await client.send(request)
+                message = str(error.exception)
+                payload = json.loads(message)
+                self.assertEqual(payload["status"], 403)
+                expected = json.loads(body) if body.startswith(b'{') else body.decode("utf-8")
+                self.assertEqual(payload["body"], expected)
+                self.assertTrue(responses[0].is_closed)
+
+    async def test_responses_over_ten_mib_are_returned_in_full(self):
+        _, config = prepare(SPEC)
+        body = b'x' * (10 * 1024 * 1024 + 1)
+        for status in (200, 500):
+            with self.subTest(status=status):
+                responses = []
+
+                def backend(request):
+                    result = httpx.Response(status, stream=httpx.ByteStream(body))
+                    responses.append(result)
+                    return result
+
+                async with APIClient(config, transport=httpx.MockTransport(backend)) as client:
+                    request = httpx.Request("GET", config.base_url)
+                    request.extensions["openapi.generated_headers"] = list(request.headers.raw)
+                    if status == 200:
+                        result = await client.send(request)
+                        self.assertEqual(result.content, body)
+                    else:
+                        with self.assertRaises(ToolError) as error:
                             await client.send(request)
-
-    async def test_prefixed_non_authorization_credential_echo_is_withheld(self):
-        _, config = prepare(SPEC, credential_headers="X-Key")
-
-        def backend(request):
-            self.assertEqual(request.headers["x-key"], "Token secret")
-            return httpx.Response(200, stream=httpx.ByteStream(b'{"echo":"secret"}'))
-
-        transport = httpx.MockTransport(backend)
-        with patch("network.get_http_headers", return_value={"x-key": "Token secret"}):
-            async with APIClient(config, transport=transport) as client:
-                request = httpx.Request("GET", config.base_url)
-                request.extensions["openapi.generated_headers"] = list(request.headers.raw)
-                with self.assertRaisesRegex(ToolError, "withheld"):
-                    await client.send(request)
+                        payload = json.loads(str(error.exception))
+                        self.assertEqual(payload, {"status": status, "body": body.decode("utf-8")})
+                self.assertTrue(responses[0].is_closed)
 
     async def test_concurrency_and_total_deadline_include_waiting(self):
         _, config = prepare(SPEC)
@@ -207,17 +256,6 @@ class NetworkTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.gather(*(send() for _ in range(5)))
         self.assertEqual(peak, 2)
         self.assertEqual(active, 0)
-
-    def test_credential_echo_variants(self):
-        headers = {"authorization": "Bearer example-secret", "x-key": "key/value"}
-        for content in (b'example-secret', b'{"x": "example\\u002dsecret"}', b'key%2Fvalue'):
-            self.assertTrue(contains_credentials(content, headers))
-        for authorization in ("Bearer  example-secret", "Bearer\texample-secret"):
-            with self.subTest(authorization=authorization):
-                self.assertTrue(contains_credentials(
-                    b'example-secret', {"authorization": authorization},
-                ))
-        self.assertFalse(contains_credentials(b'{"ok": true}', headers))
 
 
 if __name__ == "__main__":

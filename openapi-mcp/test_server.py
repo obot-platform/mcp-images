@@ -185,6 +185,32 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                     await client.call_tool("createItem", {"title": "hello"})
                     self.assertEqual(json.loads(calls[-1].content), {"title": "hello"})
 
+    async def test_security_declarations_allow_anonymous_tool_calls(self):
+        for version in ("3.0.4", "3.1.2"):
+            for scheme in ({"type": "apiKey", "in": "header", "name": "X-Key"},
+                           {"type": "http", "scheme": "bearer"}):
+                for headers in ("", "Authorization, X-Key"):
+                    with self.subTest(version=version, scheme=scheme, headers=headers):
+                        spec = copy.deepcopy(SPEC)
+                        spec["openapi"] = version
+                        spec["components"] = {"securitySchemes": {"auth": scheme}}
+                        spec["security"] = [{"auth": []}]
+                        spec["paths"]["/items/{id}"]["get"]["security"] = [{"auth": []}]
+                        calls = []
+
+                        def backend(request):
+                            calls.append(request)
+                            return response({"ok": True})
+
+                        document, config = prepare(spec, credential_headers=headers)
+                        async with APIClient(config, transport=httpx.MockTransport(backend)) as http:
+                            async with Client(create_server(document, config, http)) as client:
+                                result = await client.call_tool("getItem", {"id": "1"}, raise_on_error=False)
+                                self.assertFalse(result.is_error, str(result))
+                        self.assertEqual(len(calls), 1)
+                        self.assertNotIn("authorization", calls[0].headers)
+                        self.assertNotIn("x-key", calls[0].headers)
+
     async def test_upstream_response_does_not_require_matching_openapi_output_schema(self):
         spec = copy.deepcopy(SPEC)
         spec["paths"]["/items/{id}"]["get"]["responses"]["200"]["content"] = {
@@ -211,20 +237,26 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         })
         calls = []
 
+        status = 401
+
         def backend(request):
             calls.append(request)
-            return response({"message": "authorization required"}, status=401)
+            return response({"message": "authorization required"}, status=status)
 
-        document, config = prepare(spec)
+        document, config = prepare(spec, credential_headers="Authorization")
         async with APIClient(config, transport=httpx.MockTransport(backend)) as http:
             async with Client(create_server(document, config, http)) as client:
                 tool = next(t for t in await client.list_tools() if t.name == "getItem")
                 self.assertNotIn("Authorization", tool.inputSchema.get("properties", {}))
-                result = await client.call_tool("getItem", {"id": "1"}, raise_on_error=False)
-                self.assertTrue(result.is_error)
-                self.assertIn("401", str(result))
-        self.assertEqual(len(calls), 1)
-        self.assertNotIn("authorization", calls[0].headers)
+                for status in (401, 403):
+                    result = await client.call_tool("getItem", {"id": "1"}, raise_on_error=False)
+                    self.assertTrue(result.is_error)
+                    self.assertEqual(json.loads(result.content[0].text), {
+                        "status": status, "body": {"message": "authorization required"},
+                    })
+        self.assertEqual(len(calls), 2)
+        for request in calls:
+            self.assertNotIn("authorization", request.headers)
 
     async def test_http_concurrent_credentials_health_and_cookie_isolation(self):
         calls = []
@@ -245,48 +277,155 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual((await health.get(url + "/healthz")).json(), {"status": "ok"})
                     self.assertEqual((await health.get(url + "/readyz")).json(), {"status": "ok"})
 
-                async def user(key, missing=False):
-                    headers = {"Authorization": f"Bearer {key}", "X-Key": key,
-                               "X-Unwanted": "login-token", "Cookie": "session=client",
-                               "X-View": "incoming-not-an-argument"}
-                    if missing:
-                        del headers["X-Key"]
+                async def user(key, credentials):
+                    headers = {"X-Unwanted": "login-token", "Cookie": "session=client",
+                               "X-View": "incoming-not-an-argument", **credentials}
                     async with Client(StreamableHttpTransport(url + "/mcp", headers=headers)) as client:
                         tools = await client.list_tools()
                         self.assertNotIn(key, str(tools))
                         return await client.call_tool("getItem", {"id": key}, raise_on_error=False)
 
-                results = await asyncio.gather(user("user-a-secret"), user("user-b-secret"))
+                results = await asyncio.gather(
+                    user("user-a-secret", {"Authorization": "Bearer user-a-secret", "X-Key": "user-a-secret"}),
+                    user("user-b-secret", {"Authorization": "Bearer user-b-secret", "X-Key": "user-b-secret"}),
+                    user("anonymous", {}),
+                )
                 self.assertTrue(all(not r.is_error for r in results))
-                missing = await user("missing-secret", missing=True)
-                self.assertTrue(missing.is_error)
-                self.assertEqual(len(calls), 2)
-                await user("user-c-secret")
-                self.assertEqual(len(calls), 3)
+                partial = await user("partial-secret", {"Authorization": "Bearer partial-secret"})
+                self.assertFalse(partial.is_error, str(partial))
+                complete = await user("user-c-secret", {"Authorization": "Bearer user-c-secret", "X-Key": "user-c-secret"})
+                self.assertFalse(complete.is_error, str(complete))
+                self.assertEqual(len(calls), 5)
                 for request in calls:
                     key = request.url.path.rsplit("/", 1)[1]
-                    self.assertEqual(request.headers["Authorization"], f"Bearer {key}")
-                    self.assertEqual(request.headers["X-Key"], key)
+                    if key == "anonymous":
+                        self.assertNotIn("Authorization", request.headers)
+                    else:
+                        self.assertEqual(request.headers["Authorization"], f"Bearer {key}")
+                    if key in ("anonymous", "partial-secret"):
+                        self.assertNotIn("X-Key", request.headers)
+                    else:
+                        self.assertEqual(request.headers["X-Key"], key)
                     for header in ("X-Unwanted", "Cookie", "X-View", "Mcp-Session-Id"):
                         self.assertNotIn(header, request.headers)
                 self.assertFalse(http.cookies)
 
-    async def test_upstream_failures_limits_and_echoes(self):
+    async def test_upstream_credential_echoes_are_returned(self):
+        document, config = prepare(SPEC, credential_headers="Authorization, X-Key")
+        bodies = (
+            b'{"echo":"Bearer test-credential"}',
+            b'{"echo":"test-credential"}',
+            b'{"echo":"test\\u002dcredential"}',
+            b'{"echo":"key%2f%76alue"}',
+        )
+        for status in (200, 403):
+            for body in bodies:
+                with self.subTest(status=status, body=body), patch("network.get_http_headers", return_value={
+                    "authorization": "Bearer test-credential", "x-key": "Token key/value",
+                }):
+                    def backend(request):
+                        self.assertEqual(request.headers["authorization"], "Bearer test-credential")
+                        self.assertEqual(request.headers["x-key"], "Token key/value")
+                        return httpx.Response(status, stream=httpx.ByteStream(body))
+
+                    async with APIClient(config, transport=httpx.MockTransport(backend)) as http:
+                        async with Client(create_server(document, config, http)) as client:
+                            result = await client.call_tool("getItem", {"id": "1"}, raise_on_error=False)
+                            self.assertEqual(result.is_error, status >= 400)
+                            expected = json.loads(body)
+                            if status >= 400:
+                                expected = {"status": status, "body": expected}
+                            self.assertEqual(json.loads(result.content[0].text), expected)
+
+    async def test_upstream_http_errors_include_response_body(self):
+        large_body = {"message": "Permission denied", "details": "x" * 9000}
+        cases = (
+            (403, b'{"message":"Permission denied","required_scope":"read:items"}',
+             {"message": "Permission denied", "required_scope": "read:items"}),
+            (400, b'[{"field":"id","message":"Invalid"}]', [{"field": "id", "message": "Invalid"}]),
+            (400, b'null', None),
+            (401, b'Invalid API key', "Invalid API key"),
+            (429, b'Rate limit exceeded', "Rate limit exceeded"),
+            (500, 'Service unavailable: réessayez'.encode("utf-8"), "Service unavailable: réessayez"),
+            (404, b'', None),
+            (500, b'{"message":"invalid JSON", "value":NaN}', '{"message":"invalid JSON", "value":NaN}'),
+            (500, b'{"message":"\\ud800"}', '{"message":"\\ud800"}'),
+            (500, b'{"message":"\\udfff"}', '{"message":"\\udfff"}'),
+            (500, b'{"\\ud800":"value"}', '{"\\ud800":"value"}'),
+            (403, json.dumps(large_body).encode("utf-8"), large_body),
+        )
+        document, config = prepare(SPEC)
+        for status, body, expected_body in cases:
+            with self.subTest(status=status):
+                def backend(request):
+                    return httpx.Response(status, stream=httpx.ByteStream(body))
+
+                async with APIClient(config, transport=httpx.MockTransport(backend)) as http:
+                    async with Client(create_server(document, config, http)) as client:
+                        result = await client.call_tool("getItem", {"id": "1"}, raise_on_error=False)
+                        self.assertTrue(result.is_error)
+                        self.assertEqual(json.loads(result.content[0].text),
+                                         {"status": status, "body": expected_body})
+
+    async def test_upstream_http_errors_preserve_escaped_control_characters(self):
+        document, config = prepare(SPEC)
+        for body in (b'\x01' * 100, b'[' + b'0,' * 32 + b'0]', b'x' * 90):
+            with self.subTest(body=body):
+                responses = []
+
+                def backend(request):
+                    result = httpx.Response(500, stream=httpx.ByteStream(body))
+                    responses.append(result)
+                    return result
+
+                async with APIClient(config, transport=httpx.MockTransport(backend)) as http:
+                    async with Client(create_server(document, config, http)) as client:
+                        result = await client.call_tool("getItem", {"id": "1"}, raise_on_error=False)
+                        self.assertTrue(result.is_error)
+                        message = result.content[0].text
+                        payload = json.loads(message)
+                        self.assertEqual(payload["status"], 500)
+                        expected = json.loads(body) if body.startswith(b'[') else body.decode("utf-8")
+                        self.assertEqual(payload["body"], expected)
+                self.assertTrue(responses[0].is_closed)
+
+    async def test_upstream_http_error_bodies_require_supported_encodings(self):
+        cases = (
+            (b'\xffprivate', {}, "UTF-8"),
+            ('private'.encode("utf-16-le"), {}, "UTF-8"),
+            (b'private', {"content-encoding": "gzip"}, "identity"),
+        )
+        document, config = prepare(SPEC, credential_headers="Authorization")
+        for body, headers, expected in cases:
+            with self.subTest(expected=expected), \
+                 patch("network.get_http_headers", return_value={"authorization": "Bearer test-credential"}):
+                def backend(request):
+                    return httpx.Response(403, stream=httpx.ByteStream(body), headers=headers)
+
+                async with APIClient(config, transport=httpx.MockTransport(backend)) as http:
+                    async with Client(create_server(document, config, http)) as client:
+                        result = await client.call_tool("getItem", {"id": "1"}, raise_on_error=False)
+                        self.assertTrue(result.is_error)
+                        payload = json.loads(result.content[0].text)
+                        self.assertEqual(payload["status"], 403)
+                        self.assertIn(expected, payload["error"])
+                        self.assertNotIn("body", payload)
+                        self.assertNotIn("test-credential", str(result))
+                        self.assertNotIn("private", str(result))
+
+    async def test_upstream_redirects_encoding_and_timeout(self):
         async def slow(request):
             await asyncio.sleep(1)
             return response({})
 
         cases = [
-            (lambda _: response({"secret": "test-credential"}, 401), "401"),
             (lambda _: response({}, 302, location="https://other.test"), "redirect"),
-            (lambda _: response({"secret": "test-credential"}), "withheld"),
-            (lambda _: response({"secret": "test-credential" * 100}), "exceeds"),
             (lambda _: response({}, **{"content-encoding": "gzip"}), "identity"),
             (slow, "timed out"),
         ]
         document, config = prepare(SPEC, credential_headers="Authorization")
         for backend, message in cases:
-            with self.subTest(message=message), patch("network.get_http_headers", return_value={"authorization": "Bearer test-credential"}), patch("network.MAX_RESPONSE", 100), patch("network.REQUEST_TIMEOUT", 0.05):
+            with self.subTest(message=message), patch("network.get_http_headers", return_value={"authorization": "Bearer test-credential"}), patch("network.REQUEST_TIMEOUT", 0.05):
                 async with APIClient(config, transport=httpx.MockTransport(backend)) as http:
                     async with Client(create_server(document, config, http)) as client:
                         result = await client.call_tool("getItem", {"id": "1"}, raise_on_error=False)
@@ -294,7 +433,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                         self.assertIn(message, str(result))
                         self.assertNotIn("test-credential", str(result))
 
-    async def test_non_utf8_credential_echoes_are_withheld(self):
+    async def test_non_utf8_responses_are_rejected(self):
         document, config = prepare(SPEC, credential_headers="X-Key")
         for encoding in ("utf-16", "utf-16-le", "utf-16-be",
                          "utf-32", "utf-32-le", "utf-32-be"):

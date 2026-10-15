@@ -69,21 +69,35 @@ class ConfigTests(unittest.TestCase):
             "parameters": {"key": {"name": "X-Key", "in": "header", "schema": {"type": "string"}}},
         }
         spec["paths"]["/items"]["get"]["parameters"] = [{"$ref": "#/components/parameters/key"}]
-        with self.assertRaisesRegex(ValueError, "OPENAPI_CREDENTIAL_HEADERS"):
-            prepare(spec)
+        prepare(spec)
         document, config = prepare(spec, credential_headers="X-Key")
         self.assertEqual(document["paths"]["/items"]["get"]["parameters"], [])
-        spec["components"]["securitySchemes"]["key"] = {"type": "oauth2"}
-        prepare(spec)
-        for scheme in ({"type": "apiKey", "in": "query", "name": "key"},):
-            spec["components"]["securitySchemes"]["key"] = scheme
-            with self.assertRaisesRegex(ValueError, "Only header"):
-                prepare(spec)
         for ref in ("https://other.test/schema", "file:///tmp/schema"):
             bad = copy.deepcopy(SPEC)
             bad["components"] = {"schemas": {"test": {"$ref": ref}}}
             with self.assertRaises(ValueError):
                 prepare(bad)
+
+    def test_security_declarations_do_not_require_credential_configuration(self):
+        schemes = (
+            {"type": "apiKey", "in": "header", "name": "X-Key"},
+            {"type": "http", "scheme": "bearer"},
+            {"type": "http", "scheme": "basic"},
+            {"type": "apiKey", "in": "query", "name": "key"},
+            {"type": "apiKey", "in": "cookie", "name": "key"},
+            {"type": "oauth2", "flows": {}},
+        )
+        for scheme in schemes:
+            with self.subTest(scheme=scheme):
+                spec = copy.deepcopy(SPEC)
+                spec["components"] = {"securitySchemes": {"auth": scheme}}
+                spec["security"] = [{"auth": []}]
+                original = copy.deepcopy(spec)
+                document, config = prepare(spec)
+                self.assertEqual(config.credential_headers, ())
+                self.assertEqual(document["components"], spec["components"])
+                self.assertEqual(document["security"], spec["security"])
+                self.assertEqual(spec, original)
 
     def test_destination_and_override(self):
         for value in ("/relative", "https://user:password@api.test", "http://localhost",

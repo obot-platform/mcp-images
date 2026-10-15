@@ -9,10 +9,23 @@ JSON schema once at startup and exposes Streamable HTTP at `/mcp`.
 | --- | --- |
 | `OPENAPI_SPEC_FILE` | Required path to an OpenAPI JSON file |
 | `OPENAPI_BASE_URL` | Optional API destination override; defaults to the specification's first usable server URL |
-| `OPENAPI_CREDENTIAL_HEADERS` | Optional comma-separated credential header names, such as `Authorization, X-API-Key`; defaults to none. Requires HTTPS; values and prefixes are forwarded unchanged |
+| `OPENAPI_CREDENTIAL_HEADERS` | Optional comma-separated credential header names to forward when supplied, such as `Authorization, X-API-Key`; defaults to none. Requires HTTPS; values and prefixes are forwarded unchanged |
 | `PORT` | Listening port; defaults to `8080` |
 
 The header setting lists names only. Obot sends their values on each MCP request.
+Obot's configuration determines whether credentials are required or optional.
+The wrapper forwards only listed credential headers with non-blank values; missing,
+empty, or whitespace-only values are omitted. OpenAPI security declarations do not
+require corresponding header configuration or prevent anonymous requests. The
+upstream API decides whether authentication is needed; HTTP 401 and 403 responses
+are returned as tool errors.
+HTTP errors retain `isError: true` and include a JSON object in MCP text content,
+such as `{"status":403,"body":{"message":"Permission denied"}}`. JSON bodies are
+parsed and included in full; non-JSON UTF-8 bodies are strings and empty bodies
+are `null`. Responses must use UTF-8 text and identity content encoding. Error
+responses with unsupported encodings omit the body and include `status` and an
+`error` reason instead. Responses are buffered in full without a size limit,
+and response bodies are returned even when they contain forwarded credentials.
 The wrapper exposes generated API operations directly as MCP tools.
 
 API requests may connect only to public IP addresses. The wrapper checks DNS
