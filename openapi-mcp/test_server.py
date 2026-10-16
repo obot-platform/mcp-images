@@ -229,6 +229,53 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(result.is_error, str(result))
                 self.assertIn("upstream-string", str(result))
 
+    async def test_non_json_success_is_wrapped_with_output_schema(self):
+        for schema_type in ("string", "object"):
+            for content_type, body in (
+                ("application/json", "Logged in user session: 123"),
+                ("text/plain", "Logged in user session: 123"),
+                ("application/xml", "<result>ok</result>"),
+                ("text/plain", ""),
+            ):
+                with self.subTest(schema_type=schema_type, content_type=content_type, body=body):
+                    spec = copy.deepcopy(SPEC)
+                    spec["paths"]["/items/{id}"]["get"]["responses"]["200"]["content"] = {
+                        "application/json": {"schema": {"type": schema_type}}
+                    }
+
+                    def backend(request):
+                        return httpx.Response(200, stream=httpx.ByteStream(body.encode()),
+                                              headers={"content-type": content_type})
+
+                    document, config = prepare(spec)
+                    async with APIClient(config, transport=httpx.MockTransport(backend)) as http:
+                        async with Client(create_server(document, config, http)) as client:
+                            tool = next(t for t in await client.list_tools() if t.name == "getItem")
+                            self.assertIsNotNone(tool.outputSchema)
+                            result = await client.call_tool("getItem", {"id": "1"}, raise_on_error=False)
+                            self.assertFalse(result.is_error, str(result))
+                            self.assertEqual(result.structured_content, {"result": body})
+                            self.assertEqual(result.content[0].text, body)
+
+    async def test_json_success_keeps_fastmcp_structured_output(self):
+        for body, expected in (
+            ({"id": "abc"}, {"id": "abc"}),
+            ([1, 2], {"result": [1, 2]}),
+            ("ok", {"result": "ok"}),
+            (None, {"result": None}),
+        ):
+            with self.subTest(body=body):
+                spec = copy.deepcopy(SPEC)
+                spec["paths"]["/items/{id}"]["get"]["responses"]["200"]["content"] = {
+                    "application/json": {"schema": {"type": "object"}}
+                }
+                document, config = prepare(spec)
+                async with APIClient(config, transport=httpx.MockTransport(lambda request: response(body))) as http:
+                    async with Client(create_server(document, config, http)) as client:
+                        result = await client.call_tool("getItem", {"id": "1"}, raise_on_error=False)
+                        self.assertFalse(result.is_error, str(result))
+                        self.assertEqual(result.structured_content, expected)
+
     async def test_authorization_parameter_is_hidden_and_upstream_error_is_returned(self):
         spec = copy.deepcopy(SPEC)
         spec["paths"]["/items/{id}"]["get"]["parameters"].append({

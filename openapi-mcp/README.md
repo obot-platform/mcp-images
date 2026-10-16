@@ -27,6 +27,10 @@ responses with unsupported encodings omit the body and include `status` and an
 `error` reason instead. Responses are buffered in full without a size limit,
 and response bodies are returned even when they contain forwarded credentials.
 The wrapper exposes generated API operations directly as MCP tools.
+Successful non-JSON UTF-8 responses retain their text content and also return
+`structuredContent: {"result": "<response text>"}`. This includes APIs that label
+plain text as `application/json`. JSON responses keep FastMCP's structured output
+behavior, and generated output schemas remain available.
 
 API requests may connect only to public IP addresses. The wrapper checks DNS
 answers on each new connection and rejects private, loopback, link-local, and
