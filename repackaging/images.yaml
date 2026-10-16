@@ -47,6 +47,10 @@ images:
     type: node
     package: "@zereight/mcp-gitlab"
     version: 2.1.52
+  - name: ipgeolocation-io-mcp
+    type: node
+    package: ipgeolocation-io-mcp
+    version: 2.0.1
   - name: grafana
     type: docker
     package: "grafana/mcp-grafana"
