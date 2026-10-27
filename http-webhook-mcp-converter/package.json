@@ -8,16 +8,12 @@
     "node": ">=20"
   },
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test test_server.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.0",
     "express": "^5.2.1",
-    "zod": "^3.25.76"
-  },
-  "overrides": {
-    "@modelcontextprotocol/sdk": {
-      "@hono/node-server": "^2.0.5"
-    }
+    "zod": "^4.6.7"
   }
 }

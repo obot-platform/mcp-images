@@ -75,7 +75,11 @@ class NetworkTests(unittest.IsolatedAsyncioTestCase):
                         request.extensions["openapi.generated_headers"] = list(request.headers.raw)
                         result = await client.send(request)
                         self.assertEqual(result.json(), {"ok": True})
-                self.assertEqual(names, ["api.example.test"])
+                # A TLS 1.3 HelloRetryRequest can invoke SNI more than once.
+                # Every ClientHello must still carry the original hostname.
+                self.assertTrue(names)
+                self.assertEqual(set(names), {"api.example.test"})
+                self.assertEqual(len(received), 1)
                 self.assertIn(b"authorization: Bearer tls-secret", received[0])
                 self.assertIn(f"host: api.example.test:{port}".encode(), received[0].lower())
             finally:

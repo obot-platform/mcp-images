@@ -9,13 +9,26 @@ permissions:
   contents: read
 
 jobs:
+  http-webhook-mcp-converter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Test webhook converter
+        working-directory: http-webhook-mcp-converter
+        run: |
+          npm ci --ignore-scripts
+          npm test
+
   openapi-mcp:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
-          version: "0.12.5"
+          version: "0.13.5"
           python-version: "3.12"
       - name: Test OpenAPI wrapper
         working-directory: openapi-mcp
