@@ -50,7 +50,7 @@ images:
   - name: ipgeolocation-io-mcp
     type: node
     package: ipgeolocation-io-mcp
-    version: 2.0.1
+    version: 2.0.2
   - name: grafana
     type: docker
     package: "grafana/mcp-grafana"
