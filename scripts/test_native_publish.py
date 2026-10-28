@@ -58,10 +58,10 @@ elif "--dry-run" in sys.argv:
             "RUNNER_TEMP": str(self.root),
             "GITHUB_OUTPUT": str(self.output),
             "COMMAND_LOG": str(self.commands),
-            "REPOSITORY": "ghcr.io/example/images/browserbase",
-            "REFERENCE": "ghcr.io/example/images/browserbase:3.0.0-obot2",
+            "REPOSITORY": "ghcr.io/example/images/sample",
+            "REFERENCE": "ghcr.io/example/images/sample:3.0.0-obot2",
             "TAG": "3.0.0-obot2",
-            "TAGS": "ghcr.io/example/images/browserbase:3.0.0-obot2",
+            "TAGS": "ghcr.io/example/images/sample:3.0.0-obot2",
             "EXPECTED_MANIFEST": json.dumps(MANIFEST),
         }
         for arch, digest in (("amd64", AMD64), ("arm64", ARM64)):

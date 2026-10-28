@@ -102,11 +102,7 @@ assembling the final application image.
 
 GitHub and STDIO wrapper builds remove inherited exact OS-package version pins
 before upgrading packages, so the pinned MMMCP release does not block security
-updates. Playwright keeps the upstream release's application and Node binary on
-a digest-pinned Ubuntu 26.04 runtime, then installs Chromium and its system
-dependencies using the bundled Playwright version. This preserves the browser
-version, non-root user, and entrypoint while applying the newer distribution's
-security fixes.
+updates.
 
 Grafana upgrades the upstream Alpine runtime packages and keeps usage statistics
 disabled. Its v2 release removes the deprecated Sift tools and splits the alerting
