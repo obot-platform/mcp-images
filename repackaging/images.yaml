@@ -30,7 +30,7 @@ images:
   - name: gitlab
     type: node
     package: "@zereight/mcp-gitlab"
-    version: 2.1.52
+    version: 2.1.62
   - name: grafana
     type: docker
     package: "grafana/mcp-grafana"
