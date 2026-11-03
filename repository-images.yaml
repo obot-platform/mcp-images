@@ -21,11 +21,11 @@ images:
   - name: github
     group: mcp-server
     catalog: true
-    version: "2.0.3"
+    version: "2.1.0"
     dockerfile: mcp-servers/Dockerfile.github
     parents:
       - arg: GITHUB_IMAGE
-        image: ghcr.io/github/github-mcp-server:v2.0.3
+        image: ghcr.io/github/github-mcp-server:v2.1.0
 
   - name: tableau
     group: mcp-server

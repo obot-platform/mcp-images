@@ -4,6 +4,9 @@ FROM ${UV_IMAGE} AS uv-bin
 
 FROM ${MMMCP_IMAGE}
 
+# Refresh cached runtime packages when the shared uv version changes.
+ARG UV_IMAGE
+
 USER root
 
 # The release base pins OS packages in /etc/apk/world. Relax exact version pins
