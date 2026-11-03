@@ -2,7 +2,7 @@ images:
   - name: aws-api
     type: python
     package: awslabs.aws-api-mcp-server
-    version: 1.5.1
+    version: 1.6.0
   - name: aws-documentation
     type: python
     package: awslabs.aws-documentation-mcp-server
@@ -34,7 +34,7 @@ images:
   - name: grafana
     type: docker
     package: "grafana/mcp-grafana"
-    version: 2.1.1-alpine
+    version: 2.2.0-alpine
     dockerfile: repackaging/Dockerfile.grafana
   - name: mongodb-database
     type: node

@@ -139,6 +139,26 @@ Changes to the scanning workflows or security policy trigger scan-only jobs.
 These jobs resolve the highest existing revision and do not build an image or
 allocate a new revision.
 
+After publication completes on the current `main` commit, **Clean Up Obsolete
+Trivy Analyses** removes old Trivy categories that are absent from the image
+manifests. This also runs when an unrelated image build fails. Active categories,
+CodeQL results, tag and pull-request histories, and registry images are preserved.
+CodeQL remains configured for Actions only.
+
+The cleanup workflow can also be dispatched manually; `apply` defaults to false.
+For a local preview, run:
+
+```sh
+python3 scripts/cleanup_trivy_analyses.py \
+  --expected-sha "$(git rev-parse HEAD)" --audit-dir /tmp/trivy-cleanup
+```
+
+Add `--apply` to delete the previewed categories. The command verifies the current
+`main` commit and manifests, records deleted IDs, and verifies preserved histories
+afterward. If interrupted or rate-limited, rerun it after resolving the cause;
+it inventories the remaining analyses again. Each workflow run uploads its audit
+files as an artifact.
+
 ## Workflow map
 
 - `.github/workflows/build.yml` tests the planner, validates Dockerfiles, and

@@ -1,0 +1,57 @@
+name: Clean Up Obsolete Trivy Analyses
+
+on:
+  workflow_run:
+    workflows: [Publish MCP Images]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Delete obsolete main-branch analyses (false previews only)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: cleanup-trivy-main
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.head_repository.full_name == github.repository &&
+       github.event.workflow_run.head_branch == 'main' &&
+       (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Install manifest parser
+        run: python3 -m pip install --disable-pip-version-check --requirement scripts/image-requirements.txt
+      - name: Clean up obsolete main analyses
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          APPLY: ${{ github.event_name == 'workflow_run' || inputs.apply }}
+        run: |
+          args=()
+          if [ "$APPLY" = "true" ]; then args+=(--apply); fi
+          python3 scripts/cleanup_trivy_analyses.py \
+            --expected-sha "$EXPECTED_SHA" \
+            --audit-dir "$RUNNER_TEMP/trivy-cleanup" "${args[@]}"
+      - name: Upload cleanup audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-cleanup-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/trivy-cleanup
+          if-no-files-found: ignore
