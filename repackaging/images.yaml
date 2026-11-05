@@ -36,6 +36,10 @@ images:
     package: "grafana/mcp-grafana"
     version: 2.2.0-alpine
     dockerfile: repackaging/Dockerfile.grafana
+  - name: ipgeolocation-io-mcp
+    type: node
+    package: ipgeolocation-io-mcp
+    version: 2.0.3
   - name: mongodb-database
     type: node
     package: mongodb-mcp-server
