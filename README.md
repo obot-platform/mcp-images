@@ -95,13 +95,19 @@ Repository-image parent versions are similarly defined in
 as `latest` or `node:alpine` and CI overrides them with digest-pinned manifest
 references.
 
+The OpenAPI wrapper uses Wolfi with Python 3.12 in matching build and runtime
+stages. Its locked application environment is copied into the runtime without
+the uv build tool. Shared MMMCP images also upgrade distribution packages when
+assembling the final application image.
+
 GitHub and STDIO wrapper builds remove inherited exact OS-package version pins
 before upgrading packages, so the pinned MMMCP release does not block security
-updates. Playwright keeps the upstream release's application and Node binary on
-a digest-pinned Ubuntu 26.04 runtime, then installs Chromium and its system
-dependencies using the bundled Playwright version. This preserves the browser
-version, non-root user, and entrypoint while applying the newer distribution's
-security fixes.
+updates.
+
+Grafana upgrades the upstream Alpine runtime packages and keeps usage statistics
+disabled. Its v2 release removes the deprecated Sift tools and splits the alerting
+management tools into read and write tools. Request-scoped authentication headers
+require Streamable HTTP, which is already used by the catalog configuration.
 
 ## Manual rebuilds
 
@@ -132,6 +138,26 @@ Published images are signed, receive an SBOM, and are scanned with Trivy.
 Changes to the scanning workflows or security policy trigger scan-only jobs.
 These jobs resolve the highest existing revision and do not build an image or
 allocate a new revision.
+
+After publication completes on the current `main` commit, **Clean Up Obsolete
+Trivy Analyses** removes old Trivy categories that are absent from the image
+manifests. This also runs when an unrelated image build fails. Active categories,
+CodeQL results, tag and pull-request histories, and registry images are preserved.
+CodeQL remains configured for Actions only.
+
+The cleanup workflow can also be dispatched manually; `apply` defaults to false.
+For a local preview, run:
+
+```sh
+python3 scripts/cleanup_trivy_analyses.py \
+  --expected-sha "$(git rev-parse HEAD)" --audit-dir /tmp/trivy-cleanup
+```
+
+Add `--apply` to delete the previewed categories. The command verifies the current
+`main` commit and manifests, records deleted IDs, and verifies preserved histories
+afterward. If interrupted or rate-limited, rerun it after resolving the cause;
+it inventories the remaining analyses again. Each workflow run uploads its audit
+files as an artifact.
 
 ## Workflow map
 

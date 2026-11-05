@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from fastmcp import FastMCP
 from fastmcp.server.middleware import Middleware
 from mcp import McpError
-from mcp.types import ErrorData
+from mcp.types import ErrorData, TextContent
 from starlette.responses import JSONResponse
 
 from config import ConfigError, load_spec, prepare
@@ -28,6 +28,21 @@ class Unavailable(Middleware):
 
     async def on_request(self, context, call_next):
         raise McpError(ErrorData(code=-32000, message=self.reason))
+
+
+class StructuredTextOutput(Middleware):
+    """Wrap FastMCP's non-JSON fallback without dropping the original text."""
+
+    async def on_call_tool(self, context, call_next):
+        result = await call_next(context)
+        # FastMCP 3.4.7 returns only text when response.json() fails, even
+        # with an output schema. validate_output=False relaxes that schema,
+        # but the MCP SDK still requires structured content to be present.
+        # Work around https://github.com/PrefectHQ/fastmcp/issues/5367.
+        if (not result.is_error and result.structured_content is None
+                and len(result.content) == 1 and isinstance(result.content[0], TextContent)):
+            result.structured_content = {"result": result.content[0].text}
+        return result
 
 
 def add_status_routes(server, error=None):
@@ -61,6 +76,7 @@ def create_server(document, config, client):
         mask_error_details=True,
         # Real API responses can differ from the published OpenAPI response schema.
         validate_output=False,
+        middleware=[StructuredTextOutput()],
     )
 
     add_status_routes(server)

@@ -1,0 +1,9 @@
+ARG BASE_IMAGE=grafana/mcp-grafana:latest
+FROM ${BASE_IMAGE}
+
+USER root
+RUN apk upgrade --no-cache
+USER mcp-grafana
+
+# Preserve the previous release's telemetry behavior.
+ENV GRAFANA_USAGE_STATS=disabled

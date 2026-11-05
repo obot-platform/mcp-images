@@ -4,7 +4,6 @@ import asyncio
 import json
 import socket
 import ssl
-from urllib.parse import quote, unquote
 
 import httpcore
 import httpx
@@ -15,7 +14,6 @@ from httpcore._backends.auto import AutoBackend
 from config import Config, checked_address
 
 REQUEST_TIMEOUT = 30
-MAX_RESPONSE = 10 * 1024 * 1024
 MAX_CONCURRENT = 32
 
 
@@ -113,37 +111,6 @@ def origin(url):
     return url.scheme, url.host, url.port
 
 
-def contains_credentials(content: bytes, credentials: dict[str, str]) -> bool:
-    try:
-        text = content.decode("utf-8")
-    except UnicodeDecodeError:
-        raise ToolError("Upstream response must be UTF-8 text") from None
-    # BOM-less UTF-16/32 can decode as UTF-8 with embedded NULs. FastMCP may
-    # later parse those bytes as JSON and expose a credential this scan missed.
-    if "\x00" in text:
-        raise ToolError("Upstream response must be UTF-8 text")
-    try:
-        decoded = json.dumps(json.loads(text), ensure_ascii=False)
-    except (ValueError, RecursionError):
-        decoded = text
-    # Percent escapes are case-insensitive and can encode only part of a secret.
-    percent_decoded = unquote(decoded)
-    for value in credentials.values():
-        secrets = [value]
-        parts = value.split(maxsplit=1)
-        if len(parts) == 2:
-            secrets.append(parts[1])
-        for secret in secrets:
-            if not secret:
-                continue
-            candidates = (secret, quote(secret, safe=""), json.dumps(secret, ensure_ascii=True)[1:-1])
-            if secret in percent_decoded or any(
-                candidate in text or candidate in decoded for candidate in candidates
-            ):
-                return True
-    return False
-
-
 class APIClient(httpx.AsyncClient):
     def __init__(self, config: Config, *, transport=None):
         self.api_transport = transport or CheckedTransport()
@@ -162,17 +129,18 @@ class APIClient(httpx.AsyncClient):
             raise ToolError("Missing generated request metadata")
         incoming = get_http_headers(include_all=True)
         credentials = {}
+        # Obot owns credential requiredness; the upstream API decides whether
+        # requests without credentials are authorized.
         for name in self.config.credential_headers:
             value = incoming.get(name)
             if not value or not value.strip():
-                raise ToolError(f"Missing required credential header: {name}")
+                continue
             credentials[name] = value
         request.headers = httpx.Headers(generated)
         for name in ("cookie", "authorization", *self.config.credential_headers):
             request.headers.pop(name, None)
         request.headers.update(credentials)
-        # Prevent decompression bombs: only accept identity-encoded bodies. The
-        # decoded and wire byte limits are consequently identical.
+        # Keep the upstream response encoding predictable.
         request.headers["accept-encoding"] = "identity"
         request.extensions["timeout"] = dict.fromkeys(("connect", "read", "write", "pool"), REQUEST_TIMEOUT)
         try:
@@ -181,18 +149,38 @@ class APIClient(httpx.AsyncClient):
                 try:
                     if 300 <= response.status_code < 400:
                         raise ToolError("Upstream redirects are disabled")
-                    if response.status_code >= 400:
-                        raise ToolError(f"Upstream API returned HTTP {response.status_code}")
-                    if response.headers.get("content-encoding", "identity").lower() != "identity":
-                        raise ToolError("Upstream must honor Accept-Encoding: identity")
-                    chunks = bytearray()
-                    async for chunk in response.aiter_raw():
-                        if len(chunks) + len(chunk) > MAX_RESPONSE:
-                            raise ToolError("Upstream response exceeds 10 MiB")
-                        chunks.extend(chunk)
-                    content = bytes(chunks)
-                    if contains_credentials(content, credentials):
-                        raise ToolError("Upstream response contained a credential and was withheld")
+                    error_status = response.status_code if response.status_code >= 400 else None
+                    try:
+                        if response.headers.get("content-encoding", "identity").lower() != "identity":
+                            raise ToolError("Upstream must honor Accept-Encoding: identity")
+                        chunks = bytearray()
+                        async for chunk in response.aiter_raw():
+                            chunks.extend(chunk)
+                        content = bytes(chunks)
+                        try:
+                            body = content.decode("utf-8")
+                        except UnicodeDecodeError:
+                            raise ToolError("Upstream response must be UTF-8 text") from None
+                        # Reject BOM-less UTF-16/32 that decodes as UTF-8 with NULs.
+                        if "\x00" in body:
+                            raise ToolError("Upstream response must be UTF-8 text")
+                    except ToolError as error:
+                        if error_status:
+                            raise ToolError(json.dumps({"status": error_status, "error": str(error)},
+                                                       ensure_ascii=False)) from None
+                        raise
+                    if error_status:
+                        try:
+                            message = json.dumps({"status": error_status, "body": json.loads(body)},
+                                                 ensure_ascii=False, allow_nan=False)
+                            # Lone surrogates accepted by json.loads cannot be sent as UTF-8.
+                            message.encode("utf-8")
+                        except (ValueError, RecursionError):
+                            # Preserve non-JSON bodies as strings; the outer error
+                            # remains valid JSON even for malformed upstream JSON.
+                            message = json.dumps({"status": error_status, "body": body if body else None},
+                                                 ensure_ascii=False)
+                        raise ToolError(message)
                     return httpx.Response(response.status_code, content=content, request=request,
                                           headers={"content-type": response.headers.get("content-type", "")})
                 finally:

@@ -142,7 +142,7 @@ def prepare(spec: dict, *, base_url: str | None = None,
         while isinstance(node, dict) and "$ref" in node:
             ref = node["$ref"]
             if ref in seen:
-                raise ConfigError("Cyclic parameter or security references are unsupported")
+                raise ConfigError("Cyclic parameter references are unsupported")
             seen.add(ref)
             node = reference(ref)
         return node
@@ -162,18 +162,6 @@ def prepare(spec: dict, *, base_url: str | None = None,
                 walk(value)
 
     walk(document)
-    for scheme in document.get("components", {}).get("securitySchemes", {}).values():
-        scheme = resolve(scheme)
-        if scheme.get("type") == "oauth2":
-            continue  # OAuth declarations do not produce forwarded header credentials.
-        if scheme.get("type") == "apiKey" and scheme.get("in") == "header":
-            name = scheme.get("name", "").lower()
-        elif scheme.get("type") == "http" and scheme.get("scheme", "").lower() == "bearer":
-            name = "authorization"
-        else:
-            raise ConfigError("Only header API keys and pre-issued bearer credentials are supported")
-        if name not in headers:
-            raise ConfigError("Declare every security scheme's header in OPENAPI_CREDENTIAL_HEADERS")
 
     if base_url:
         base = destination(base_url)

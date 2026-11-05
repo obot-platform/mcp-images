@@ -14,7 +14,8 @@ RUN git clone ${TABLEAU_MCP_REPO} . && \
 # Refresh affected transitive dependencies within upstream's compatible ranges.
 # The resulting lockfile is also used by the production stage below.
 RUN npm update --ignore-scripts \
-    axios body-parser fast-uri hono @hono/node-server ip-address qs @xmldom/xmldom
+    axios body-parser fast-uri hono @hono/node-server ip-address qs @xmldom/xmldom \
+    @modelcontextprotocol/sdk proxy-addr follow-redirects
 RUN npm run build
 
 FROM ${NODE_IMAGE} AS runner

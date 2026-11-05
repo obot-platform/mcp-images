@@ -9,9 +9,15 @@ USER root
 COPY --from=mmmcp /usr/local/bin/mmmcp /usr/local/bin/
 COPY ./scripts/mmmcp.sh /usr/local/bin/mmmcp.sh
 
-RUN apk add jq && chmod +x /usr/local/bin/mmmcp.sh
+RUN apk upgrade --no-cache && \
+    apk add --no-cache jq && \
+    chmod +x /usr/local/bin/mmmcp.sh
 
-RUN mkdir -p /home/user/.local/bin && chown -R 1000:0 /home/user && chown -R 1000:0 /usr/local
+# Command children do not inherit HOME from mmmcp. Give uid 1000 a passwd
+# entry so language runtimes can still resolve its home directory.
+RUN adduser -D -H -u 1000 -G root -h /home/user user && \
+    mkdir -p /home/user/.local/bin && \
+    chown -R 1000:0 /home/user && chown -R 1000:0 /usr/local
 
 USER 1000
 
