@@ -1,0 +1,27 @@
+ARG BASE_IMAGE=ghcr.io/a-lafon/postgres-dba-mcp:latest
+ARG MMMCP_IMAGE=ghcr.io/obot-platform/mmmcp:latest
+
+FROM ${BASE_IMAGE} AS upstream
+FROM ${MMMCP_IMAGE}
+
+USER root
+
+COPY --from=upstream /postgres-dba-mcp /usr/local/bin/postgres-dba-mcp
+COPY --from=upstream /usr/share/doc/postgres-dba-mcp/ /usr/share/doc/postgres-dba-mcp/
+COPY --chmod=0755 scripts/mmmcp.sh /usr/local/bin/mmmcp.sh
+
+# Allow security updates to packages pinned by the MMMCP release image.
+RUN sed -i -E 's/^([^=<>~]+)=.*$/\1/' /etc/apk/world && \
+    apk upgrade --no-cache && \
+    apk add --no-cache jq && \
+    ln -s postgres-dba-mcp /usr/local/bin/postgres-mcp && \
+    mkdir -p /home/user && \
+    chown 1000:1000 /home/user
+
+USER 1000:1000
+ENV HOME=/home/user
+WORKDIR /home/user
+EXPOSE 8099
+
+# Preserve the catalog's postgres-mcp command and DATABASE_URI forwarding.
+ENTRYPOINT ["mmmcp.sh"]

@@ -10,7 +10,8 @@ Images are divided into three families:
 
 - **Repackages** are configured in `repackaging/images.yaml`. Node and Python
   packages are installed into an application base and then wrapped with MMMCP.
-  Docker repackages use an upstream image directly.
+  Docker repackages use an upstream image directly or copy its binary into an
+  MMMCP runtime.
 - **Repository images** are versioned images configured in
   `repository-images.yaml`, such as GitHub and Tableau.
 - **Utilities** are unversioned images configured in `repository-images.yaml`,
@@ -51,6 +52,8 @@ Shared build inputs select their known dependents:
 - Node base or Node repackage changes select Node repackages.
 - Python base or Python repackage changes select Python repackages.
 - MMMCP wrapper changes select Node and Python repackages.
+- MMMCP version and launcher changes also select Docker repackages whose
+  Dockerfiles declare `MMMCP_IMAGE`.
 - Docker repackage changes select Docker repackages.
 - Common planner, publisher, or Docker context changes select all applicable
   images.
@@ -100,9 +103,16 @@ stages. Its locked application environment is copied into the runtime without
 the uv build tool. Shared MMMCP images also upgrade distribution packages when
 assembling the final application image.
 
-GitHub and STDIO wrapper builds remove inherited exact OS-package version pins
-before upgrading packages, so the pinned MMMCP release does not block security
-updates.
+GitHub, PostgreSQL, and STDIO wrapper builds remove inherited exact OS-package
+version pins before upgrading packages, so the pinned MMMCP release does not
+block security updates.
+
+PostgreSQL copies the static binary from
+[`a-lafon/postgres-dba-mcp`](https://github.com/a-lafon/postgres-dba-mcp)'s Docker
+image into the MMMCP runtime. The `postgres-mcp` command, `DATABASE_URI`
+forwarding, port 8099, and `/` endpoint stay compatible with the catalog. The
+server returns bounded CSV results, accepts one SQL statement per call, and adds
+the `analyze_locks` tool.
 
 Grafana upgrades the upstream Alpine runtime packages and keeps usage statistics
 disabled. Its v2 release removes the deprecated Sift tools and splits the alerting
@@ -116,7 +126,8 @@ modes:
 
 - `single-repackage` rebuilds one named repackage.
 - `all-mmmcp-consumers` rebuilds every Node and Python repackage and every
-  repository or utility Dockerfile with an `MMMCP_IMAGE` argument.
+  Docker repackage, repository image, or utility whose Dockerfile declares
+  `MMMCP_IMAGE`.
 
 A manual run intentionally rebuilds the selected images and allocates their next
 immutable revisions. Changing the configured MMMCP version automatically

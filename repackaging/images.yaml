@@ -45,11 +45,10 @@ images:
     package: mysql-mcp-server
     version: 0.4.4
   - name: postgresql
-    type: python
-    package: postgres-mcp
-    version: 0.3.0
-    constraints:
-      - "mcp<2"
+    type: docker
+    package: ghcr.io/a-lafon/postgres-dba-mcp
+    version: 0.3.3
+    dockerfile: repackaging/Dockerfile.postgresql
   - name: redis
     type: python
     package: redis-mcp-server
