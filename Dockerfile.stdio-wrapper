@@ -15,7 +15,7 @@ USER root
 RUN sed -i -E 's/^([^=<>~]+)=.*$/\1/' /etc/apk/world && \
     apk upgrade --no-cache && \
     apk add --no-cache make git nodejs npm pnpm python3 && \
-    npm install -g npm@12.2.1 && \
+    npm install -g npm@12.2.2 && \
     npm_root="$(npm root -g)" && \
     npm pkg delete devDependencies --prefix "${npm_root}/npm" && \
     npm update --prefix "${npm_root}/npm" --omit=dev \
