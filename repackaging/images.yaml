@@ -36,10 +36,6 @@ images:
     package: "grafana/mcp-grafana"
     version: 2.2.0-alpine
     dockerfile: repackaging/Dockerfile.grafana
-  - name: mongodb-database
-    type: node
-    package: mongodb-mcp-server
-    version: 3.1.0
   - name: mysql-mcp-server
     type: python
     package: mysql-mcp-server

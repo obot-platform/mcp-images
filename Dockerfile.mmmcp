@@ -9,7 +9,9 @@ USER root
 COPY --from=mmmcp /usr/local/bin/mmmcp /usr/local/bin/
 COPY ./scripts/mmmcp.sh /usr/local/bin/mmmcp.sh
 
-RUN apk upgrade --no-cache && \
+# Relax inherited OS package pins so apk can install security updates.
+RUN sed -i -E 's/^([^=<>~]+)=.*$/\1/' /etc/apk/world && \
+    apk upgrade --no-cache && \
     apk add --no-cache jq && \
     chmod +x /usr/local/bin/mmmcp.sh
 

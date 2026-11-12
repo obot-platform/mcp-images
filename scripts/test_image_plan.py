@@ -225,7 +225,7 @@ images:
                 "ARG MMMCP_IMAGE=mmmcp:latest\nFROM ${MMMCP_IMAGE}\n",
                 encoding="utf-8",
             )
-            (root / "Dockerfile.tableau").write_text(
+            (root / "Dockerfile.example").write_text(
                 "FROM node:22\n", encoding="utf-8"
             )
             (root / "Dockerfile.stdio").write_text(
@@ -234,7 +234,7 @@ images:
             )
             entries = [
                 entry("repository", "github", dockerfile="Dockerfile.github"),
-                entry("repository", "tableau", dockerfile="Dockerfile.tableau"),
+                entry("repository", "example", dockerfile="Dockerfile.example"),
             ]
             self.assertEqual(
                 self.names(
@@ -324,16 +324,16 @@ images:
             ),
             entry(
                 "repository",
-                "tableau",
+                "example",
                 version="1",
-                dockerfile="mcp-servers/Dockerfile.tableau",
-                paths=["tableau/config.json"],
+                dockerfile="mcp-servers/Dockerfile.example",
+                paths=["example/config.json"],
             ),
         ]
         selected = image_plan.select_affected(
-            "repository", entries, entries, {"tableau/config.json"}
+            "repository", entries, entries, {"example/config.json"}
         )
-        self.assertEqual(self.names(selected), ["tableau"])
+        self.assertEqual(self.names(selected), ["example"])
 
     def test_unrelated_change_selects_nothing(self):
         self.assertEqual(
@@ -364,7 +364,7 @@ class PlanTests(unittest.TestCase):
             encoding="utf-8",
         )
         (self.root / "mcp-servers").mkdir()
-        (self.root / "mcp-servers" / "Dockerfile.tableau").write_text(
+        (self.root / "mcp-servers" / "Dockerfile.example").write_text(
             "FROM node:22\n", encoding="utf-8"
         )
         (self.root / "mcp-servers" / "Dockerfile.github").write_text(
@@ -486,9 +486,9 @@ class PlanTests(unittest.TestCase):
             self.root,
             "repository",
             {
-                "name": "tableau",
+                "name": "example",
                 "version": "4.0.5",
-                "dockerfile": "mcp-servers/Dockerfile.tableau",
+                "dockerfile": "mcp-servers/Dockerfile.example",
                 "parents": [{"arg": "NODE_IMAGE", "image": "node:22-alpine"}],
             },
             "ghcr.io/org/repo",
