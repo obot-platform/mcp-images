@@ -349,7 +349,7 @@ class PlanTests(unittest.TestCase):
         self.tempdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tempdir.name)
         (self.root / "MMMCP_IMAGE").write_text(
-            "ghcr.io/obot-platform/mmmcp:v0.1.1\n", encoding="utf-8"
+            "ghcr.io/obot-platform/mmmcp:v0.2.2\n", encoding="utf-8"
         )
         (self.root / "UV_IMAGE").write_text(
             "ghcr.io/astral-sh/uv:0.12.5\n", encoding="utf-8"
@@ -467,7 +467,7 @@ class PlanTests(unittest.TestCase):
         )
         self.assertEqual(
             result["wrapper_image"],
-            "ghcr.io/obot-platform/mmmcp:v0.1.1",
+            "ghcr.io/obot-platform/mmmcp:v0.2.2",
         )
         self.assertNotIn("aliases", result)
         self.assertEqual(
@@ -520,7 +520,7 @@ class PlanTests(unittest.TestCase):
         )
         self.assertEqual(
             result["build_args"]["MMMCP_IMAGE"],
-            "ghcr.io/obot-platform/mmmcp:v0.1.1",
+            "ghcr.io/obot-platform/mmmcp:v0.2.2",
         )
         self.assertEqual(
             pin.call_args_list,
@@ -536,7 +536,7 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(
             result["build_args"],
             {
-                "MMMCP_IMAGE": "ghcr.io/obot-platform/mmmcp:v0.1.1",
+                "MMMCP_IMAGE": "ghcr.io/obot-platform/mmmcp:v0.2.2",
                 "UV_IMAGE": "ghcr.io/astral-sh/uv:0.12.5",
             },
         )
