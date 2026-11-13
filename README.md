@@ -13,7 +13,7 @@ Images are divided into three families:
   Docker repackages use an upstream image directly or copy its binary into an
   MMMCP runtime.
 - **Repository images** are versioned images configured in
-  `repository-images.yaml`, such as GitHub and Tableau.
+  `repository-images.yaml`, such as GitHub.
 - **Utilities** are unversioned images configured in `repository-images.yaml`,
   such as the STDIO wrapper and HTTP webhook converter.
 

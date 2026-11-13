@@ -27,15 +27,6 @@ images:
       - arg: GITHUB_IMAGE
         image: ghcr.io/github/github-mcp-server:v2.1.0
 
-  - name: tableau
-    group: mcp-server
-    catalog: true
-    version: "4.8.1"
-    dockerfile: mcp-servers/Dockerfile.tableau
-    parents:
-      - arg: NODE_IMAGE
-        image: node:22-alpine
-
   - name: http-webhook-mcp-converter
     group: mcp-server
     dockerfile: mcp-servers/Dockerfile.http-webhook-mcp-converter
