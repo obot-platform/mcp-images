@@ -34,7 +34,7 @@ images:
   - name: grafana
     type: docker
     package: "grafana/mcp-grafana"
-    version: 2.2.0-alpine
+    version: 2.3.0-alpine
     dockerfile: repackaging/Dockerfile.grafana
   - name: mysql-mcp-server
     type: python
