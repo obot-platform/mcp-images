@@ -1,8 +1,26 @@
-ARG BASE_IMAGE=grafana/mcp-grafana:latest
+ARG BASE_IMAGE=grafana/mcp-grafana:2.3.0-alpine
+# Rebuild the pinned v2.3.0 source with a patched Go toolchain. Keep the
+# upstream runtime image so its user, entrypoint, and transport defaults remain.
+# Update the source revision and version together with repackaging/images.yaml.
+FROM golang:1.27.4-alpine AS builder
+ENV GOTOOLCHAIN=local
+RUN apk add --no-cache git
+WORKDIR /src
+RUN git init && git remote add origin https://github.com/grafana/mcp-grafana.git && \
+    git fetch --depth=1 origin c8cafb67854c45e79f8f9b5fca7d9b3a403f1771 && \
+    git checkout --detach FETCH_HEAD
+# x/crypto v0.59.0 removes the unmaintained OpenPGP package. Grafana uses
+# bcrypt, not OpenPGP, so no application OpenPGP API migration is needed.
+RUN go get golang.org/x/crypto@v0.59.0
+RUN CGO_ENABLED=0 go build -p 4 -trimpath \
+    -ldflags="-s -w -X github.com/grafana/mcp-grafana/v2.version=v2.3.0" \
+    -o /out/mcp-grafana ./cmd/mcp-grafana
+
 FROM ${BASE_IMAGE}
 
 USER root
 RUN apk upgrade --no-cache
+COPY --from=builder --chown=1000:1000 /out/mcp-grafana /app/mcp-grafana
 USER mcp-grafana
 
 # Preserve the previous release's telemetry behavior.

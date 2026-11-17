@@ -52,4 +52,6 @@ images:
   - name: terraform
     type: docker
     package: hashicorp/terraform-mcp-server
+    # Keep the source revision in Dockerfile.terraform in sync.
     version: 1.4.1
+    dockerfile: repackaging/Dockerfile.terraform
