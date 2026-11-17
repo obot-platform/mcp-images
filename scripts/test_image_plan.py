@@ -225,7 +225,7 @@ images:
                 "ARG MMMCP_IMAGE=mmmcp:latest\nFROM ${MMMCP_IMAGE}\n",
                 encoding="utf-8",
             )
-            (root / "Dockerfile.tableau").write_text(
+            (root / "Dockerfile.example").write_text(
                 "FROM node:22\n", encoding="utf-8"
             )
             (root / "Dockerfile.stdio").write_text(
@@ -234,7 +234,7 @@ images:
             )
             entries = [
                 entry("repository", "github", dockerfile="Dockerfile.github"),
-                entry("repository", "tableau", dockerfile="Dockerfile.tableau"),
+                entry("repository", "example", dockerfile="Dockerfile.example"),
             ]
             self.assertEqual(
                 self.names(
@@ -282,6 +282,37 @@ images:
             [],
         )
 
+    def test_docker_mmmcp_repackage_tracks_only_its_runtime_dependencies(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            (root / "repackaging").mkdir()
+            (root / "repackaging/Dockerfile.mcp-docker").write_text("FROM scratch\n")
+            (root / "repackaging/Dockerfile.wrapped").write_text(
+                "ARG MMMCP_IMAGE=mmmcp:latest\nFROM ${MMMCP_IMAGE}\n"
+            )
+            entries = [
+                *self.repackages,
+                entry("repackage", "wrapped", type="docker", package="vendor/server",
+                      version="1", dockerfile="repackaging/Dockerfile.wrapped"),
+            ]
+            expected = ["node-a", "node-b", "python-a", "wrapped"]
+            self.assertEqual(
+                self.names(image_plan.select_dependency(root, "repackage", entries, "mmmcp")),
+                expected,
+            )
+            for changed in ("MMMCP_IMAGE", "scripts/mmmcp.sh"):
+                with self.subTest(changed=changed):
+                    selected = image_plan.select_affected("repackage", entries, entries, {changed}, root=root)
+                    self.assertEqual(self.names(selected), expected)
+            for changed in ("UV_IMAGE", "Dockerfile.base-python", "Dockerfile.mmmcp", "unrelated.txt"):
+                with self.subTest(changed=changed):
+                    selected = image_plan.select_affected("repackage", entries, entries, {changed}, root=root)
+                    self.assertNotIn("wrapped", self.names(selected))
+            selected = image_plan.select_affected(
+                "repackage", entries, entries, {"repackaging/Dockerfile.wrapped"}, root=root
+            )
+            self.assertEqual(self.names(selected), ["wrapped"])
+
     def test_repository_owned_path_selects_only_owner(self):
         entries = [
             entry(
@@ -293,16 +324,16 @@ images:
             ),
             entry(
                 "repository",
-                "tableau",
+                "example",
                 version="1",
-                dockerfile="mcp-servers/Dockerfile.tableau",
-                paths=["tableau/config.json"],
+                dockerfile="mcp-servers/Dockerfile.example",
+                paths=["example/config.json"],
             ),
         ]
         selected = image_plan.select_affected(
-            "repository", entries, entries, {"tableau/config.json"}
+            "repository", entries, entries, {"example/config.json"}
         )
-        self.assertEqual(self.names(selected), ["tableau"])
+        self.assertEqual(self.names(selected), ["example"])
 
     def test_unrelated_change_selects_nothing(self):
         self.assertEqual(
@@ -318,7 +349,7 @@ class PlanTests(unittest.TestCase):
         self.tempdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tempdir.name)
         (self.root / "MMMCP_IMAGE").write_text(
-            "ghcr.io/obot-platform/mmmcp:v0.1.1\n", encoding="utf-8"
+            "ghcr.io/obot-platform/mmmcp:v0.2.2\n", encoding="utf-8"
         )
         (self.root / "UV_IMAGE").write_text(
             "ghcr.io/astral-sh/uv:0.12.5\n", encoding="utf-8"
@@ -333,7 +364,7 @@ class PlanTests(unittest.TestCase):
             encoding="utf-8",
         )
         (self.root / "mcp-servers").mkdir()
-        (self.root / "mcp-servers" / "Dockerfile.tableau").write_text(
+        (self.root / "mcp-servers" / "Dockerfile.example").write_text(
             "FROM node:22\n", encoding="utf-8"
         )
         (self.root / "mcp-servers" / "Dockerfile.github").write_text(
@@ -376,6 +407,8 @@ class PlanTests(unittest.TestCase):
     def test_custom_docker_repackage_preserves_pinned_parent(self, pin):
         image = {"name": "browser", "type": "docker", "package": "vendor/browser",
                  "version": "1", "dockerfile": "repackaging/Dockerfile.browser"}
+        (self.root / "repackaging").mkdir()
+        (self.root / image["dockerfile"]).write_text("ARG BASE_IMAGE=browser:latest\nFROM ${BASE_IMAGE}\n")
         result = image_plan.repackage_adapter(self.root, image, "ghcr.io/org/repo")
         self.assertEqual(result["dockerfile"], image["dockerfile"])
         self.assertEqual(result["build_args"], {"BASE_IMAGE": "browser@sha256:aaa"})
@@ -384,6 +417,32 @@ class PlanTests(unittest.TestCase):
         image["dockerfile"] = "../Dockerfile"
         with self.assertRaisesRegex(image_plan.ImagePlanError, "within the repository"):
             image_plan.repackage_adapter(self.root, image, "ghcr.io/org/repo")
+
+    @mock.patch("image_plan.resolve_revision")
+    @mock.patch("image_plan.pinned_reference", return_value="postgres@sha256:aaa")
+    def test_postgresql_uses_upstream_image_and_canonical_mmmcp(self, pin, revision):
+        root = Path(__file__).resolve().parents[1]
+        entries = image_plan.read_manifest(root / "repackaging/images.yaml", "repackage")
+        image = next(item["image"] for item in entries if item["image"]["name"] == "postgresql")
+        tag = f"{image['version']}-obot1"
+        revision.return_value = {"revision": 1, "tag": tag}
+        result = image_plan.plan_image(
+            root, "repackage", image, "ghcr.io/org/repo", "main", "branch", "sha"
+        )
+        pin.assert_called_once_with(f"ghcr.io/a-lafon/postgres-dba-mcp:{image['version']}")
+        self.assertEqual(result["build_args"], {
+            "BASE_IMAGE": "postgres@sha256:aaa",
+            "MMMCP_IMAGE": (root / "MMMCP_IMAGE").read_text().strip(),
+        })
+        self.assertFalse(result["application_base"])
+        self.assertNotIn("application_repository", result)
+        self.assertEqual(result["tags"], [f"ghcr.io/org/repo/postgresql:{tag}"])
+        self.assertEqual(result["catalog_payload"], {
+            "image_name": "ghcr.io/org/repo/postgresql", "new_tag": tag,
+        })
+        self.assertIn("postgresql", [
+            item["image"]["name"] for item in image_plan.select_dependency(root, "repackage", entries, "mmmcp")
+        ])
 
     @mock.patch("image_plan.resolve_revision")
     @mock.patch("image_plan.pinned_reference")
@@ -408,7 +467,7 @@ class PlanTests(unittest.TestCase):
         )
         self.assertEqual(
             result["wrapper_image"],
-            "ghcr.io/obot-platform/mmmcp:v0.1.1",
+            "ghcr.io/obot-platform/mmmcp:v0.2.2",
         )
         self.assertNotIn("aliases", result)
         self.assertEqual(
@@ -427,9 +486,9 @@ class PlanTests(unittest.TestCase):
             self.root,
             "repository",
             {
-                "name": "tableau",
+                "name": "example",
                 "version": "4.0.5",
-                "dockerfile": "mcp-servers/Dockerfile.tableau",
+                "dockerfile": "mcp-servers/Dockerfile.example",
                 "parents": [{"arg": "NODE_IMAGE", "image": "node:22-alpine"}],
             },
             "ghcr.io/org/repo",
@@ -461,7 +520,7 @@ class PlanTests(unittest.TestCase):
         )
         self.assertEqual(
             result["build_args"]["MMMCP_IMAGE"],
-            "ghcr.io/obot-platform/mmmcp:v0.1.1",
+            "ghcr.io/obot-platform/mmmcp:v0.2.2",
         )
         self.assertEqual(
             pin.call_args_list,
@@ -477,7 +536,7 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(
             result["build_args"],
             {
-                "MMMCP_IMAGE": "ghcr.io/obot-platform/mmmcp:v0.1.1",
+                "MMMCP_IMAGE": "ghcr.io/obot-platform/mmmcp:v0.2.2",
                 "UV_IMAGE": "ghcr.io/astral-sh/uv:0.12.5",
             },
         )

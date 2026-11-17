@@ -146,6 +146,8 @@ def repackage_adapter(root: Path, image: dict[str, Any], registry_prefix: str) -
             build_args["MCP_NPM_OVERRIDES"] = json.dumps(npm_overrides, separators=(",", ":"))
     else:
         build_args = {"BASE_IMAGE": pinned_reference(f"{package}:{version}")}
+        if _uses_build_arg(root, dockerfile, "MMMCP_IMAGE"):
+            build_args["MMMCP_IMAGE"] = _configured_image(root, "MMMCP_IMAGE")
     return {
         "name": name, "version": version, "dockerfile": dockerfile,
         "build_args": build_args, "catalog": True,
@@ -305,7 +307,13 @@ def select_dependency(root: Path, family: str, entries: list[dict[str, Any]], de
     if dependency != "mmmcp":
         raise ImagePlanError(f"unsupported image dependency: {dependency}")
     if family == "repackage":
-        return [entry for entry in entries if entry["image"].get("type") in ("node", "python")]
+        return [
+            entry for entry in entries
+            if entry["image"].get("type") in ("node", "python")
+            or _uses_build_arg(
+                root, entry["image"].get("dockerfile", "repackaging/Dockerfile.mcp-docker"), "MMMCP_IMAGE"
+            )
+        ]
     return [
         entry
         for entry in entries
@@ -332,10 +340,13 @@ def select_affected(family: str, entries: list[dict[str, Any]], previous_entries
         if changed_paths & {
             ".github/workflows/base-images.yml",
             "Dockerfile.mmmcp",
-            "MMMCP_IMAGE",
-            "scripts/mmmcp.sh",
         }:
             types.update(("node", "python"))
+        if changed_paths & {"MMMCP_IMAGE", "scripts/mmmcp.sh"}:
+            selected.update(
+                entry["image"]["name"]
+                for entry in select_dependency(root, family, entries, "mmmcp")
+            )
         if "repackaging/Dockerfile.mcp-docker" in changed_paths: types.add("docker")
         selected.update(name for name, entry in current.items() if entry["image"].get("type") in types)
         selected.update(
