@@ -1,27 +1,7 @@
-ARG GO_IMAGE=golang:1.27.4-alpine
-ARG NODE_IMAGE=node:26-alpine
+ARG GITHUB_IMAGE=ghcr.io/github/github-mcp-server:latest
 ARG MMMCP_IMAGE=ghcr.io/obot-platform/mmmcp:latest
 
-# Rebuild the pinned release until upstream ships the Go/x/net security fixes.
-# Update both GITHUB_REVISION values and GITHUB_VERSION with the manifest version.
-# Keep the full UI build even though the catalog uses stdio/PAT authentication.
-FROM ${NODE_IMAGE} AS github-ui
-ARG GITHUB_REVISION=4bcdcdf8d7beee98c9448e73e257308280924cc4
-RUN apk add --no-cache git && \
-    git clone https://github.com/github/github-mcp-server.git /src && \
-    cd /src && git checkout "${GITHUB_REVISION}"
-WORKDIR /src/ui
-RUN npm ci && npm run build
-
-FROM ${GO_IMAGE} AS binary
-ARG GITHUB_VERSION=2.1.0
-ARG GITHUB_REVISION=4bcdcdf8d7beee98c9448e73e257308280924cc4
-ENV GOTOOLCHAIN=local
-WORKDIR /src
-COPY --from=github-ui /src /src
-RUN go get golang.org/x/net@v0.62.0 && \
-    CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=${GITHUB_VERSION} -X main.commit=${GITHUB_REVISION}" \
-        -o /server/github-mcp-server ./cmd/github-mcp-server
+FROM ${GITHUB_IMAGE} AS binary
 
 FROM ${MMMCP_IMAGE}
 

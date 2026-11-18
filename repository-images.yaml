@@ -21,14 +21,11 @@ images:
   - name: github
     group: mcp-server
     catalog: true
-    # Keep the source revision/version in Dockerfile.github in sync.
     version: "2.1.0"
     dockerfile: mcp-servers/Dockerfile.github
     parents:
-      - arg: GO_IMAGE
-        image: golang:1.27.4-alpine
-      - arg: NODE_IMAGE
-        image: node:26-alpine
+      - arg: GITHUB_IMAGE
+        image: ghcr.io/github/github-mcp-server:v2.1.0
 
   - name: http-webhook-mcp-converter
     group: mcp-server
