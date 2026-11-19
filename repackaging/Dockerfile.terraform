@@ -1,0 +1,20 @@
+ARG BASE_IMAGE=hashicorp/terraform-mcp-server:1.4.1
+
+# Rebuild the same upstream release with compatible security-patched dependencies.
+# Update TERRAFORM_REVISION whenever the manifest package version changes.
+FROM golang:1.26.11-alpine AS build
+ARG TERRAFORM_REVISION=3781509a674482ca7e2821fab8159a25e3b29bdf
+ENV GOTOOLCHAIN=local
+RUN apk add --no-cache git && \
+    git clone https://github.com/hashicorp/terraform-mcp-server.git /src && \
+    cd /src && git checkout "${TERRAFORM_REVISION}"
+WORKDIR /src
+RUN go get golang.org/x/net@v0.62.0 \
+        go.opentelemetry.io/otel@v1.47.0 \
+        go.opentelemetry.io/otel/sdk@v1.47.0 \
+        go.opentelemetry.io/otel/trace@v1.47.0 && \
+    CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/terraform-mcp-server ./cmd/terraform-mcp-server
+
+# Preserve upstream certificates, user, entrypoint, and other image metadata.
+FROM ${BASE_IMAGE}
+COPY --from=build /out/terraform-mcp-server /bin/terraform-mcp-server

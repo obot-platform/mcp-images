@@ -1,12 +1,27 @@
-ARG BASE_IMAGE=ghcr.io/a-lafon/postgres-dba-mcp:latest
+ARG BASE_IMAGE=ghcr.io/a-lafon/postgres-dba-mcp:0.3.3
 ARG MMMCP_IMAGE=ghcr.io/obot-platform/mmmcp:latest
 
 FROM ${BASE_IMAGE} AS upstream
+
+# Preserve upstream v0.3.3's native musl parser and static Linux build while
+# using the patched Go toolchain rather than the vulnerable prebuilt binary.
+# Update source revision and version together with repackaging/images.yaml.
+FROM golang:1.27.4-alpine AS builder
+ENV GOTOOLCHAIN=local
+RUN apk add --no-cache git build-base
+WORKDIR /src
+RUN git init && git remote add origin https://github.com/a-lafon/postgres-dba-mcp.git && \
+    git fetch --depth=1 origin e7d6abbc1b95c179beae5108b8baca1a059f17b9 && \
+    git checkout --detach FETCH_HEAD
+RUN CGO_ENABLED=1 go build -p 4 -trimpath -tags pgquery_cgo,netgo,osusergo \
+    -ldflags="-s -w -X main.version=0.3.3 -linkmode=external -extldflags '-static -s'" \
+    -o /out/postgres-dba-mcp ./cmd/postgres-dba-mcp
+
 FROM ${MMMCP_IMAGE}
 
 USER root
 
-COPY --from=upstream /postgres-dba-mcp /usr/local/bin/postgres-dba-mcp
+COPY --from=builder /out/postgres-dba-mcp /usr/local/bin/postgres-dba-mcp
 COPY --from=upstream /usr/share/doc/postgres-dba-mcp/ /usr/share/doc/postgres-dba-mcp/
 COPY --chmod=0755 scripts/mmmcp.sh /usr/local/bin/mmmcp.sh
 
