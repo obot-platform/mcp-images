@@ -40,6 +40,11 @@ images:
     type: python
     package: mysql-mcp-server
     version: 0.4.4
+  - name: onelogin
+    type: node
+    package: "@onelogin/onelogin-mcp"
+    version: 1.2.1
+    dockerfile: repackaging/Dockerfile.onelogin
   - name: postgresql
     type: docker
     package: ghcr.io/a-lafon/postgres-dba-mcp

@@ -1,0 +1,16 @@
+ARG BASE_IMAGE=ghcr.io/obot-platform/mcp-images/base-node:main
+FROM ${BASE_IMAGE}
+
+ARG MCP_PACKAGE
+ARG MCP_VERSION
+
+USER root
+
+# The onelogin-mcp bin uses a "#!/usr/bin/env bun" shebang, so Bun must be on
+# PATH at runtime even though the package is installed with npm.
+RUN set -eu; \
+    apk add --no-cache bun; \
+    npm install -g "${MCP_PACKAGE}@${MCP_VERSION}"; \
+    npm cache clean --force
+
+USER 1000
